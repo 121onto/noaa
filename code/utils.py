@@ -1,7 +1,9 @@
 from __future__ import (print_function, division)
 
 import os
+import sys
 import gzip
+import select
 import cPickle
 import random
 import numpy as np
@@ -17,7 +19,21 @@ from preproc import IncrementalZCA
 SEED = 1234
 
 ###########################################################################
-## processing
+## general
+
+def prompt_for_quit_or_timeout(msg='Stop execution?', timeout=2):
+    """Adapted from: http://stackoverflow.com/a/2904057/759442
+    """
+    print("%s (y/N) " % msg)
+    i, o, e = select.select([sys.stdin], [], [], timeout)
+    if i:
+        if sys.stdin.readline().strip() == 'y':
+            return True
+
+    return False
+
+###########################################################################
+## data processing
 
 def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-proc/',
                     out_path='../data/memmap/', image_size=3*300*300):
@@ -45,12 +61,21 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
     v_idx = 0
     tt_idx = 0
 
+    terminate = False
     for idx, file in enumerate(sorted(os.listdir(img_path))):
+        if idx < 20000:
+            continue
         if idx % 1000 == 0:
             print(file)
             np.memmap.flush(tn_x)
             np.memmap.flush(v_x)
             np.memmap.flush(tt_x)
+            terminate = prompt_for_quit_or_timeout()
+            if terminate:
+                print('Exiting gracefully...')
+                break
+            else:
+                print('Program will continue...')
         if file.endswith('.jpg'):
             with open(os.path.join(img_path,file), 'rb') as f:
                 im = Image.open(f)
@@ -70,15 +95,18 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
                     tt_x[tt_idx][:] = im[:]
                     tt_idx += 1
 
+    if terminate:
+        sys.exit('')
+
 
 def whiten_images(path='../data/memmap/', batch_size=500):
     tn_x_path = os.path.join(path, 'tn_x.dat')
     v_x_path = os.path.join(path, 'v_x.dat')
     tt_x_path = os.path.join(path, 'tt_x.dat')
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044*4,image_size))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500*4,image_size))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925*4,image_size))
 
     # fit
     izca = IncrementalZCA(n_components=512, batch_size=batch_size)

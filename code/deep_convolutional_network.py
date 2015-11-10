@@ -22,8 +22,8 @@ SEED = 1234
 
 def fit_lenet(image_shape=(300, 300), n_image_channels=3,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
-              filter_shapes=(5, 5), nkerns=(2, 6), pool_sizes=(2,2),
-              n_hidden=500,
+              filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10), pool_sizes=(2, 2, 2),
+              n_hidden=1000,
               learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
               n_epochs=1000, batch_size=20, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
