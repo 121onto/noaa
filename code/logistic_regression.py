@@ -9,7 +9,7 @@ import theano.tensor as T
 ## local imports
 
 from utils import load_data, display_results, build_submission_stub
-from layers import LeNet
+from layers import LogisticRegression
 from solvers import SupervisedMSGD
 
 ###########################################################################
@@ -20,11 +20,8 @@ SEED = 1234
 ###########################################################################
 ## main
 
-def fit_lenet(image_shape=(300, 300), n_image_channels=3,
+def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=447,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
-              filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10),
-              pool_sizes=[(2, 2), (2, 2), (2, 2)],
-              n_hidden=1000, n_out=447,
               learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
               n_epochs=1000, batch_size=200, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
@@ -33,16 +30,9 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3,
     x = T.matrix('x')
     y = T.ivector('y')
 
-    classifier = LeNet(
-        rng=rng.RandomState(SEED),
+    classifier = LogisticRegression(
         input=x,
-        batch_size=batch_size,
-        image_shape=image_shape,
-        n_image_channels=n_image_channels,
-        nkerns=nkerns,
-        filter_shapes=filter_shapes,
-        pool_sizes=pool_sizes,
-        n_hidden=n_hidden,
+        n_in=n_imaeg_channels*reduce(np.multiply, image_shape),
         n_out=n_out
     )
     cost = (
@@ -73,9 +63,12 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3,
     return learner
 
 if __name__ == '__main__':
-    lenet = fit_lenet()
+    lr = fit_logistic_regression()
     labels_dict, stub = build_submission_stub()
-    predicted_values = lenet.predict()
+    predicted_values = lr.predict()
+    if True:
+        return
+
     # something goes here: ??? stub['whaleCode'] = 1
     stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
     stub = stub[['Image', 'whileID']]

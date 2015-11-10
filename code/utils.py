@@ -40,6 +40,7 @@ def build_submission_stub(csv_path='../data/train.csv', img_path='../data/imgs-p
                     out_path='../output/submission_stub.csv'):
 
     train = pd.read_csv(csv_path)
+    train_files = pd.unique(train['Image'].values)
     train['whaleID'] = train['whaleID'].astype('category')
     train['whaleCode'] = train['whaleID'].cat.codes
     labels_dict = dict(zip(train.whaleCode, train.whaleID))
@@ -50,11 +51,12 @@ def build_submission_stub(csv_path='../data/train.csv', img_path='../data/imgs-p
             continue
         if file.endswith('.jpg'):
             label = 'w' + file.split('w')[-1]
-            if label not in labels_dict:
+            if file not in train_files:
                 submission_stub.append(file)
 
     frame = pd.DataFrame(submission_stub, columns=['Image'])
     return labels_dict, frame
+
 
 def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-proc/',
                     out_path='../data/memmap/', image_size=3*300*300):
@@ -78,6 +80,9 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
     tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
     tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='w+', shape=(6925,))
 
+    # randomly allocate 500 samples to the validation dataset
+    v_batch = np.random.choice(range(4544), size=500, replace=False)
+    a_idx = 0
     tn_idx = 0
     v_idx = 0
     tt_idx = 0
@@ -104,14 +109,16 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
                 im = np.asarray(im).T.flatten()
 
                 if label in labels_dict:
-                    if v_idx < 500:
+                    if a_idx in v_batch:
                         v_x[v_idx,:] = im[:]
                         v_y[v_idx] = labels_dict[label]
                         v_idx += 1
+                        a_idx += 1
                     else:
                         tn_x[tn_idx,:] = im[:]
                         tn_y[tn_idx] = labels_dict[label]
                         tn_idx += 1
+                        a_idx += 1
                 else:
                     tt_x[tt_idx,:] = im[:]
                     tt_idx += 1
