@@ -11,6 +11,7 @@ import pandas as pd
 import theano
 import theano.tensor as T
 from PIL import Image
+from sklearn.utils import gen_batches
 
 ###########################################################################
 ## config and local imports
@@ -35,6 +36,26 @@ def prompt_for_quit_or_timeout(msg='Stop execution?', timeout=2):
 ###########################################################################
 ## data processing
 
+def build_submission_stub(csv_path='../data/train.csv', img_path='../data/imgs-proc/',
+                    out_path='../output/submission_stub.csv'):
+
+    train = pd.read_csv(csv_path)
+    train['whaleID'] = train['whaleID'].astype('category')
+    train['whaleCode'] = train['whaleID'].cat.codes
+    labels_dict = dict(zip(train.whaleCode, train.whaleID))
+
+    submission_stub = []
+    for idx, file in enumerate(sorted(os.listdir(img_path))):
+        if not file.startswith('w_'):
+            continue
+        if file.endswith('.jpg'):
+            label = 'w' + file.split('w')[-1]
+            if label not in labels_dict:
+                submission_stub.append(file)
+
+    frame = pd.DataFrame(submission_stub, columns=['Image'])
+    return labels_dict, frame
+
 def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-proc/',
                     out_path='../data/memmap/', image_size=3*300*300):
 
@@ -50,12 +71,12 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
     tt_x_path = os.path.join(out_path, 'tt_x.dat')
     tt_y_path = os.path.join(out_path, 'tt_y.dat')
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044*4,image_size))
-    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='w+', shape=(4044*4,))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500*4,image_size))
-    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='w+', shape=(500*4,))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925*4,image_size))
-    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='w+', shape=(6925*4,))
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
+    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='w+', shape=(4044,))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
+    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='w+', shape=(500,))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
+    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='w+', shape=(6925,))
 
     tn_idx = 0
     v_idx = 0
@@ -63,7 +84,7 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
 
     terminate = False
     for idx, file in enumerate(sorted(os.listdir(img_path))):
-        if idx < 20000:
+        if not file.startswith('w_'):
             continue
         if idx % 1000 == 0:
             print(file)
@@ -84,48 +105,53 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
 
                 if label in labels_dict:
                     if v_idx < 500:
-                        v_x[v_idx][:] = im[:]
+                        v_x[v_idx,:] = im[:]
                         v_y[v_idx] = labels_dict[label]
                         v_idx += 1
                     else:
-                        tn_x[tn_idx][:] = im[:]
+                        tn_x[tn_idx,:] = im[:]
                         tn_y[tn_idx] = labels_dict[label]
                         tn_idx += 1
                 else:
-                    tt_x[tt_idx][:] = im[:]
+                    tt_x[tt_idx,:] = im[:]
                     tt_idx += 1
 
     if terminate:
         sys.exit('')
 
 
-def whiten_images(path='../data/memmap/', batch_size=500):
+def whiten_images(path='../data/memmap/', batch_size=500, n_components=500, image_size=3*300*300):
     tn_x_path = os.path.join(path, 'tn_x.dat')
     v_x_path = os.path.join(path, 'v_x.dat')
     tt_x_path = os.path.join(path, 'tt_x.dat')
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044*4,image_size))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500*4,image_size))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925*4,image_size))
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
 
     # fit
-    izca = IncrementalZCA(n_components=512, batch_size=batch_size)
+    print('Fitting on training data')
+    izca = IncrementalZCA(n_components=n_components, batch_size=batch_size)
     izca.fit(tn_x)
+    print('Fitting on validation data')
     n_samples, n_features = v_x.shape
-    for batch in gen_batches(n_samples, batch_size):
+    for idx, batch in enumerate(gen_batches(n_samples, batch_size)):
         izca.partial_fit(v_x[batch])
 
     # transform
     n_samples, n_features = tn_x.shape
+    print('Transforming training data')
     for batch in gen_batches(n_samples, batch_size):
         tn_x[batch][:] = izca.transform(tn_x[batch])
         np.memmap.flush(tn_x)
 
+    print('Transforming validation data')
     n_samples, n_features = v_x.shape
     for batch in gen_batches(n_samples, batch_size):
         v_x[batch][:] = izca.transform(v_x[batch])
         np.memmap.flush(v_x)
 
+    print('Transforming test data')
     n_samples, n_features = tt_x.shape
     for batch in gen_batches(n_samples, batch_size):
         tt_x[batch][:] = izca.transform(tt_x[batch])
@@ -135,7 +161,7 @@ def whiten_images(path='../data/memmap/', batch_size=500):
 ###########################################################################
 ## i/o
 
-def load_data(path='../data/memmap/'):
+def load_data(path='../data/memmap/', image_size=3*300*300):
     tn_x_path = os.path.join(path, 'tn_x.dat')
     tn_y_path = os.path.join(path, 'tn_y.dat')
     v_x_path = os.path.join(path, 'v_x.dat')

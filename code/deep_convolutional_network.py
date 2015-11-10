@@ -8,7 +8,7 @@ import theano.tensor as T
 ###########################################################################
 ## local imports
 
-from utils import load_data, display_results
+from utils import load_data, display_results, build_submission_stub
 from layers import LeNet
 from solvers import SupervisedMSGD
 
@@ -22,10 +22,11 @@ SEED = 1234
 
 def fit_lenet(image_shape=(300, 300), n_image_channels=3,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
-              filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10), pool_sizes=(2, 2, 2),
-              n_hidden=1000,
+              filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10),
+              pool_sizes=[(2, 2), (2, 2), (2, 2)],
+              n_hidden=1000, n_out=447,
               learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
-              n_epochs=1000, batch_size=20, patience=10000,
+              n_epochs=1000, batch_size=200, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
 
     index = T.lscalar()
@@ -73,4 +74,8 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3,
 
 if __name__ == '__main__':
     lenet = fit_lenet()
-    print(lenet.predict('test'))
+    labels_dict, stub = build_submission_stub()
+    stub['whaleCode'] = lenet.predict('test')
+    stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
+    stub = stub[['Image', 'whileID']]
+    stub.to_csv('../output/init_preds.csv', index=False)

@@ -290,8 +290,6 @@ class IncrementalZCA(BaseEstimator, TransformerMixin):
         self.singular_values_ = S[:self.n_components_]
         self.mean_ = col_mean
         self.var_ = col_var
-        self.zca_components_ = np.dot(self.components_.T *
-            np.sqrt(1.0 / (self.singular_values_ ** 2 + self.bias)), self.components_)
 
     def transform(self, X):
         if self.copy:
@@ -299,7 +297,10 @@ class IncrementalZCA(BaseEstimator, TransformerMixin):
             X = np.copy(X)
         X /= self.scale_by
         X -= self.mean_
-        X_transformed = np.dot(X, self.zca_components_.T)
+        # forget storing the zca_components matrix
+        X_transformed = np.dot(X, self.components_.T *
+                               np.sqrt(1.0 / (self.singular_values_ ** 2 + self.bias)))
+        X_transformed = np.dot(X_transformed, self.components_)
         return X_transformed
 
 

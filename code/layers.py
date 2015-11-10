@@ -472,23 +472,26 @@ class LeNet(BaseLayer):
                  n_hidden, n_out):
 
         # reshapes the input
-        self.input = input.reshape((batch_size, n_image_channels) + image_size)
+        self.input = input.reshape((batch_size, n_image_channels) + image_shape)
         self.n_layers = len(nkerns)
         self.input_shape = image_shape
         self.n_out = n_out
+
+        # random rotation
+
 
         # build graphs
         self.convolution_layers = []
         self.params = []
         self.L1 = 0
-        self.l2 = 0
+        self.L2 = 0
         for i in xrange(self.n_layers):
             if i == 0:
                 feature_maps_in=n_image_channels
                 input=self.input
                 input_shape=self.input_shape
             else:
-                feature_maps_in=nkerns[i]
+                feature_maps_in=nkerns[i - 1]
                 input=self.convolution_layers[i - 1].output
                 input_shape = self.shape_reduction(input_shape, filter_shapes[i - 1], pool_sizes[i - 1])
 
