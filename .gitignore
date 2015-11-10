@@ -1,0 +1,26 @@
+# general
+data/*
+!data/README.md
+output/*
+!output/README.md
+
+# python stuff
+__pycache__/
+*.py[cod]
+
+# osx
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+
+# emacs
+*~
+\#*\#
+
