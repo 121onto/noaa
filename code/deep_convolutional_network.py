@@ -10,7 +10,7 @@ import theano.tensor as T
 
 from utils import load_data, display_results, build_submission_stub
 from layers import LeNet
-from solvers import SupervisedMSGD, SupervisedRandomMSGD
+from solvers import SupervisedMSGD
 
 ###########################################################################
 ## config
@@ -20,13 +20,13 @@ SEED = 1234
 ###########################################################################
 ## main
 
-def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=False,
+def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=None,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
-              filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10),
+              filter_shapes=[(5, 5), (3,3), (3,3)], nkerns=(32, 64, 128),
               pool_sizes=[(2, 2), (2, 2), (2, 2)],
               n_hidden=1000, n_out=447,
               learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
-              n_epochs=1000, batch_size=200, patience=10000,
+              n_epochs=1000, batch_size=128, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
 
     index = T.lscalar()
@@ -50,31 +50,17 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=False,
         + L1_reg * classifier.L1
         + L2_reg * classifier.L2
     )
-    if randomize:
-        learner = SupervisedRandomMSGD(
-            index,
-            x,
-            y,
-            batch_size,
-            learning_rate,
-            load_data(datasets),
-            outpath,
-            classifier,
-            cost,
-            rng=rng.RandomState(SEED)
-        )
-    else:
-        learner = SupervisedMSGD(
-            index,
-            x,
-            y,
-            batch_size,
-            learning_rate,
-            load_data(datasets),
-            outpath,
-            classifier,
-            cost
-        )
+    learner = SupervisedMSGD(
+        index,
+        x,
+        y,
+        batch_size,
+        load_data(datasets),
+        outpath,
+        classifier,
+        cost,
+        learning_rate=learning_rate
+    )
 
     best_validation_loss, best_iter, epoch, elapsed_time = learner.fit(
         n_epochs=n_epochs,

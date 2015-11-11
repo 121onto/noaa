@@ -12,6 +12,10 @@ from theano.tensor.shared_randomstreams import RandomStreams
 ###########################################################################
 ## base layer
 
+def relu(x):
+    return T.switch(x<0, 0, x)
+
+
 def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=rng, dist='uniform'):
     if dist=='uniform':
         rtn = np.asarray(
@@ -52,12 +56,15 @@ class BaseLayer(object):
 class HiddenLayer(BaseLayer):
 
     def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=T.tanh):
+
         self.input = input
+        W_shape = (n_in, n_out)
+        b_shape = (n_out,)
+
         if W is None:
             # suggested initial weights larger for sigmoid activiation
             W_scale = 24. if (activation == theano.tensor.nnet.sigmoid) else 6.
             W_scale = np.sqrt(W_scale / (n_in + n_out))
-            W_shape = (n_in, n_out)
             W = theano.shared(
                 value=initialize_tensor(W_scale, W_shape, theano.config.floatX, rng=rng, dist='uniform'),
                 name='W',
@@ -65,7 +72,6 @@ class HiddenLayer(BaseLayer):
             )
 
         if b is None:
-            b_shape = (n_out,)
             b = theano.shared(
                 value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
                 name='b',
@@ -74,9 +80,21 @@ class HiddenLayer(BaseLayer):
 
         self.W = W
         self.b = b
+        self.params = [self.W, self.b]
 
-        self.L1 = abs(self.W).sum()
-        self.L2 = abs(self.W ** 2).sum()
+        v_W = theano.shared(
+            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        v_b = theano.shared(
+            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        self.v_W = v_W
+        self.v_b = v_b
+        self.momentum = [self.v_W, self.v_b]
 
         lin_output = T.dot(self.input, self.W) + self.b
         self.output = (
@@ -84,8 +102,9 @@ class HiddenLayer(BaseLayer):
             #else 1.7159 * activation( (2./3) * lin_output) if activation == T.tanh # transformation
             else activation(lin_output)
         )
-        self.params = [self.W, self.b]
 
+        self.L1 = abs(self.W).sum()
+        self.L2 = abs(self.W ** 2).sum()
 
 ###########################################################################
 ## Logistic regression
@@ -100,16 +119,36 @@ class LogisticRegression(BaseLayer):
         n_out: integer
           the number of classes
         """
+
+        self.input = input
+        W_shape = (n_in, n_out)
+        b_shape = (n_out,)
+
         self.W = theano.shared(
-            value=np.zeros((n_in, n_out), dtype=theano.config.floatX),
+            value=np.zeros(W_shape, dtype=theano.config.floatX),
             name='W',
             borrow=True
         )
         self.b = theano.shared(
-            value=np.zeros((n_out,), dtype=theano.config.floatX),
+            value=np.zeros(b_shape, dtype=theano.config.floatX),
             name='b',
             borrow=True
         )
+        self.params = [self.W, self.b]
+
+        v_W = theano.shared(
+            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        v_b = theano.shared(
+            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        self.v_W = v_W
+        self.v_b = v_b
+        self.momentum = [self.v_W, self.v_b]
 
         self.L1 = abs(self.W).sum()
         self.L2 = abs(self.W ** 2).sum()
@@ -117,8 +156,8 @@ class LogisticRegression(BaseLayer):
         self.p_y_given_x = T.nnet.softmax(T.dot(input, self.W) + self.b)
         self.y_pred = T.argmax(self.p_y_given_x, axis=1)
 
-        self.params = [self.W, self.b]
-        self.input = input
+
+
 
     def negative_log_likelihood(self, y):
         """
@@ -165,6 +204,8 @@ class LogisticRegression(BaseLayer):
 class MLP(BaseLayer):
 
     def __init__(self, rng, input, n_in, n_hidden, n_out):
+        self.input = input
+
         self.hidden_layer = HiddenLayer(
             rng=rng,
             input=input,
@@ -178,14 +219,14 @@ class MLP(BaseLayer):
             n_out=n_out
         )
 
+        self.params = self.hidden_layer.params + self.log_reg_layer.params
+        self.momentum = self.hidden_layer.momentum + self.log_reg_layer.momentum
+
         self.L1 = self.hidden_layer.L1 + self.log_reg_layer.L1
         self.L2 = self.hidden_layer.L2 + self.log_reg_layer.L2
 
         self.negative_log_likelihood = self.log_reg_layer.negative_log_likelihood
         self.errors = self.log_reg_layer.errors
-
-        self.params = self.hidden_layer.params + self.log_reg_layer.params
-        self.input = input
         self.y_pred = self.log_reg_layer.y_pred
 
 
@@ -224,9 +265,21 @@ class ConvolutionLayer(BaseLayer):
 
         self.W = W
         self.b = b
+        self.params = [self.W, self.b]
 
-        self.L1 = abs(self.W).sum()
-        self.L2 = abs(self.W ** 2).sum()
+        v_W = theano.shared(
+            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        v_b = theano.shared(
+            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            name='v_W',
+            borrow=True
+        )
+        self.v_W = v_W
+        self.v_b = v_b
+        self.momentum = [self.v_W, self.v_b]
 
         conv_out = T.nnet.conv.conv2d(
             self.input,
@@ -249,7 +302,9 @@ class ConvolutionLayer(BaseLayer):
             lin_output if activation is None
             else activation(lin_output)
         )
-        self.params = [self.W, self.b]
+
+        self.L1 = abs(self.W).sum()
+        self.L2 = abs(self.W ** 2).sum()
 
 ###########################################################################
 ## lenet
@@ -269,6 +324,7 @@ class LeNet(BaseLayer):
         # build graphs
         self.convolution_layers = []
         self.params = []
+        self.momentum = []
         self.L1 = 0
         self.L2 = 0
         for i in xrange(self.n_layers):
@@ -289,11 +345,14 @@ class LeNet(BaseLayer):
                 filter_shape=filter_shapes[i],
                 input_shape=input_shape,
                 batch_size=batch_size,
-                pool_size=pool_sizes[i]
+                pool_size=pool_sizes[i],
+                activation=relu
             )
 
             self.convolution_layers.append(convolution)
             self.params.extend(convolution.params)
+            self.momentum.extend(convolution.momentum)
+
             self.L1 = self.L1 + convolution.L1
             self.L2 = self.L2 + convolution.L2
 
@@ -306,12 +365,14 @@ class LeNet(BaseLayer):
             n_out=self.n_out
         )
 
+        self.params.extend(self.mlp_layer.params)
+        self.momentum.extend(self.mlp_layer.momentum)
+
         self.L1 = self.L1 + self.mlp_layer.L1
         self.L2 = self.L2 + self.mlp_layer.L2
+
         self.negative_log_likelihood = self.mlp_layer.negative_log_likelihood
         self.errors = self.mlp_layer.errors
-
-        self.params.extend(self.mlp_layer.params)
         self.y_pred = self.mlp_layer.y_pred
 
 

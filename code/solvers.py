@@ -139,8 +139,10 @@ def fit_random_msgd_early_stopping(datasets, outpath, models, classifier,
 ## sdg via mini batches
 
 class MiniBatchSGD(object):
-    def __init__(self, index, x, y, batch_size, learning_rate,
-                 datasets, outpath, learner, cost, updates=None):
+    def __init__(self, index, x, y, batch_size,
+                 datasets, outpath, learner, cost, updates=None,
+                 learning_rate=0.01, momentum=0.9, weight_decay=0.0005):
+
 
         self.x = x
         self.y = y
@@ -155,12 +157,16 @@ class MiniBatchSGD(object):
 
         if updates is None:
             dparams = [T.grad(cost, param) for param in learner.params]
-            updates = [
-                (p, p - learning_rate * dp)
-                for p, dp in zip(learner.params, dparams)
+            momentum_updates = [
+                (v, momentum * v - weight_decay * learning_rate * v - learning_rate * dp)
+                for p, v, dp in zip(learner.params, learner.momentum, dparams)
             ]
-        self.updates = updates
+            updates = [
+                (p, p + momentum * v - weight_decay * learning_rate * v - learning_rate * dp)
+                for p, v, dp in zip(learner.params, learner.momentum, dparams)
+            ] + momentum_updates
 
+        self.updates = updates
         self.n_batches = self._compute_n_batches()
         self.models = self._compile_models()
 
@@ -210,13 +216,14 @@ class MiniBatchSGD(object):
 
 
 class SupervisedMSGD(MiniBatchSGD):
-    def __init__(self, index, x, y, batch_size, learning_rate,
-                 datasets, outpath, learner, cost):
+    def __init__(self, index, x, y, batch_size,
+                 datasets, outpath, learner, cost, updates=None,
+                 learning_rate=0.01, momentum=0.9, weight_decay=0.0005):
 
         super(SupervisedMSGD, self).__init__(
-            index, x, y, batch_size, learning_rate,
-            datasets, outpath, learner, cost)
-
+            index, x, y, batch_size,
+            datasets, outpath, learner, cost, updates,
+            learning_rate, momentum, weight_decay)
 
     def _compile_models(self):
         tn_x, tn_y = self.datasets[0]
@@ -229,56 +236,6 @@ class SupervisedMSGD(MiniBatchSGD):
             givens={
                 self.x: tn_x[self.index * self.batch_size: (self.index + 1) * self.batch_size],
                 self.y: tn_y[self.index * self.batch_size: (self.index + 1) * self.batch_size]
-            }
-        )
-        v_model = theano.function(
-            inputs=[self.index],
-            outputs=self.learner.errors(self.y),
-            givens={
-                self.x: v_x[self.index * self.batch_size: (self.index + 1) * self.batch_size],
-                self.y: v_y[self.index * self.batch_size: (self.index + 1) * self.batch_size]
-            }
-        )
-        return [tn_model, v_model]
-
-
-class SupervisedRandomMSGD(MiniBatchSGD):
-    def __init__(self, index, x, y, batch_size, learning_rate,
-                 datasets, outpath, learner, cost, rng):
-
-        self.rng = rng
-
-        super(SupervisedRandomMSGD, self).__init__(
-            index, x, y, batch_size, learning_rate,
-            datasets, outpath, learner, cost)
-
-
-    def _compile_models(self):
-        tn_x, tn_y = self.datasets[0]
-        v_x, v_y = self.datasets[1]
-
-        tn_range = tn_x.get_value(borrow=True).shape[0]
-        v_range = v_x.get_value(borrow=True).shape[0]
-
-        # select a random batch of images
-        tn_random_idx = self.rng.choice(size=self.batch_size, a=tn_range, replace=True)
-
-        # apply a random transformation
-        trans_x =  self.rng.random_integers(size=1, low=-4, high=4)
-        trans_y =  self.rng.random_integers(size=1, low=-4, high=4)
-        scale =  self.rng.uniform(size=1, low=1/1.3, high=1.3)
-        rotation = self.rng.uniform(size=1, low=0.0, high=2*math.pi)
-        tform = tf.SimilarityTransform(scale=scale, rotation=rotation,
-                                       translation=(trans_x, trans_y))
-
-        # TODO: testing this... if it fails, try playing around with theano.clone
-        tn_model = theano.function(
-            inputs=[],
-            outputs=self.cost,
-            updates=self.updates,
-            givens={
-                self.x: tf.warp(tn_x[tn_random_idx], tform),
-                self.y: tn_y[tn_idx]
             }
         )
         v_model = theano.function(
