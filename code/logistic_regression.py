@@ -22,8 +22,8 @@ SEED = 1234
 
 def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=447,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
-              learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
-              n_epochs=1000, batch_size=200, patience=10000,
+              learning_rate=0.01, L1_reg=0.00, L2_reg=0.000,
+              n_epochs=20, batch_size=200, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
 
     index = T.lscalar()
@@ -51,7 +51,6 @@ def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=44
         classifier,
         cost
     )
-
     best_validation_loss, best_iter, epoch, elapsed_time = learner.fit(
         n_epochs=n_epochs,
         patience=patience,
@@ -67,12 +66,12 @@ def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=44
 
 def main():
     lr = fit_logistic_regression()
-    labels_dict, stub = build_submission_stub()
     predicted_values = lr.predict()
     if True:
         return lr, predicted_values
 
     # something goes here: ??? stub['whaleCode'] = 1
+    labels_dict, stub = build_submission_stub()
     stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
     stub = stub[['Image', 'whileID']]
     stub.to_csv('../output/init_preds.csv', index=False)

@@ -294,8 +294,8 @@ class LeNet(BaseLayer):
 
             self.convolution_layers.append(convolution)
             self.params.extend(convolution.params)
-            self.L1 = self.L1 + self.convolution.L1
-            self.L2 = self.L2 + self.convolution.L2
+            self.L1 = self.L1 + convolution.L1
+            self.L2 = self.L2 + convolution.L2
 
         input_shape = self.shape_reduction(input_shape, filter_shapes[-1], pool_sizes[-1])
         self.mlp_layer = MLP(

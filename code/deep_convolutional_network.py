@@ -72,11 +72,21 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3,
 
     return learner
 
-if __name__ == '__main__':
-    lenet = fit_lenet()
-    labels_dict, stub = build_submission_stub()
-    predicted_values = lenet.predict()
+###########################################################################
+## main
+
+def main():
+    ln = fit_lenet()
+    predicted_values = ln.predict()
+    if True:
+        return ln, predicted_values
+
     # something goes here: ??? stub['whaleCode'] = 1
+    labels_dict, stub = build_submission_stub()
     stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
     stub = stub[['Image', 'whileID']]
     stub.to_csv('../output/init_preds.csv', index=False)
+
+
+if __name__ == '__main__':
+    main()

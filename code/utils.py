@@ -104,18 +104,17 @@ def build_memmap_arrays(csv_path='../data/train.csv', img_path='../data/imgs-pro
         if file.endswith('.jpg'):
             with open(os.path.join(img_path,file), 'rb') as f:
                 im = Image.open(f)
-                label = 'w' + file.split('w')[-1]
                 im = np.asarray(im).T.flatten()
 
-                if label in labels_dict:
+                if file in labels_dict:
                     if a_idx in v_batch:
                         v_x[v_idx,:] = im[:]
-                        v_y[v_idx] = labels_dict[label]
+                        v_y[v_idx] = labels_dict[file]
                         v_idx += 1
                         a_idx += 1
                     else:
                         tn_x[tn_idx,:] = im[:]
-                        tn_y[tn_idx] = labels_dict[label]
+                        tn_y[tn_idx] = labels_dict[file]
                         tn_idx += 1
                         a_idx += 1
                 else:
@@ -131,9 +130,9 @@ def whiten_images(path='../data/memmap/', batch_size=500, n_components=500, imag
     v_x_path = os.path.join(path, 'v_x.dat')
     tt_x_path = os.path.join(path, 'tt_x.dat')
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='r+', shape=(4044,image_size))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='r+', shape=(500,image_size))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='r+', shape=(6925,image_size))
 
     # fit
     print('Fitting on training data')
@@ -175,12 +174,12 @@ def load_data(path='../data/memmap/', image_size=3*300*300):
     tt_x_path = os.path.join(path, 'tt_x.dat')
     tt_y_path = os.path.join(path, 'tt_y.dat')
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
-    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='w+', shape=(4044,))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
-    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='w+', shape=(500,))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
-    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='w+', shape=(6925,))
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='r', shape=(4044,image_size))
+    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='r', shape=(4044,))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='r', shape=(500,image_size))
+    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='r', shape=(500,))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='r', shape=(6925,image_size))
+    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='r', shape=(6925,))
 
     tn_x, tn_y = make_shared((tn_x, tn_y))
     v_x , v_y  = make_shared((v_x, v_y))
