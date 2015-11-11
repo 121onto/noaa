@@ -75,6 +75,9 @@ class HiddenLayer(BaseLayer):
         self.W = W
         self.b = b
 
+        self.L1 = abs(self.W).sum()
+        self.L2 = abs(self.W ** 2).sum()
+
         lin_output = T.dot(self.input, self.W) + self.b
         self.output = (
             lin_output if activation is None
@@ -160,6 +163,7 @@ class LogisticRegression(BaseLayer):
 ## mlp
 
 class MLP(BaseLayer):
+
     def __init__(self, rng, input, n_in, n_hidden, n_out):
         self.hidden_layer = HiddenLayer(
             rng=rng,
@@ -174,15 +178,15 @@ class MLP(BaseLayer):
             n_out=n_out
         )
 
-        self.L1 = abs(self.hidden_layer.W).sum() + abs(self.log_reg_layer.W).sum()
-        self.L2 = (self.hidden_layer.W ** 2).sum() + (self.log_reg_layer.W ** 2).sum()
+        self.L1 = self.hidden_layer.L1 + self.log_reg_layer.L1
+        self.L2 = self.hidden_layer.L2 + self.log_reg_layer.L2
+
         self.negative_log_likelihood = self.log_reg_layer.negative_log_likelihood
         self.errors = self.log_reg_layer.errors
 
         self.params = self.hidden_layer.params + self.log_reg_layer.params
         self.input = input
         self.y_pred = self.log_reg_layer.y_pred
-
 
 
 ###########################################################################
@@ -200,9 +204,9 @@ class ConvolutionLayer(BaseLayer):
 
         self.input = input
 
+        i_shape = (None, feature_maps_in) + input_shape
         W_shape = (feature_maps_out, feature_maps_in) + filter_shape
         b_shape = (feature_maps_out,)
-        i_shape = (batch_size, feature_maps_in) + input_shape
 
         W_scale = 1.0/np.sqrt(feature_maps_in * reduce(np.multiply,filter_shape))
         b_scale = 0.5
@@ -220,6 +224,9 @@ class ConvolutionLayer(BaseLayer):
 
         self.W = W
         self.b = b
+
+        self.L1 = abs(self.W).sum()
+        self.L2 = abs(self.W ** 2).sum()
 
         conv_out = T.nnet.conv.conv2d(
             self.input,
@@ -259,9 +266,6 @@ class LeNet(BaseLayer):
         self.input_shape = image_shape
         self.n_out = n_out
 
-        # random rotation
-
-
         # build graphs
         self.convolution_layers = []
         self.params = []
@@ -290,8 +294,8 @@ class LeNet(BaseLayer):
 
             self.convolution_layers.append(convolution)
             self.params.extend(convolution.params)
-            self.L1 = self.L1 + abs(convolution.W).sum()
-            self.L2 = self.L2 + abs(convolution.W ** 2).sum()
+            self.L1 = self.L1 + self.convolution.L1
+            self.L2 = self.L2 + self.convolution.L2
 
         input_shape = self.shape_reduction(input_shape, filter_shapes[-1], pool_sizes[-1])
         self.mlp_layer = MLP(

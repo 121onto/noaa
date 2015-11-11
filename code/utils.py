@@ -50,7 +50,6 @@ def build_submission_stub(csv_path='../data/train.csv', img_path='../data/imgs-p
         if not file.startswith('w_'):
             continue
         if file.endswith('.jpg'):
-            label = 'w' + file.split('w')[-1]
             if file not in train_files:
                 submission_stub.append(file)
 

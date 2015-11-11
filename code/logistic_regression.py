@@ -18,7 +18,7 @@ from solvers import SupervisedMSGD
 SEED = 1234
 
 ###########################################################################
-## main
+## fit
 
 def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=447,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
@@ -32,7 +32,7 @@ def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=44
 
     classifier = LogisticRegression(
         input=x,
-        n_in=n_imaeg_channels*reduce(np.multiply, image_shape),
+        n_in=n_image_channels * reduce(np.multiply, image_shape),
         n_out=n_out
     )
     cost = (
@@ -62,14 +62,21 @@ def fit_logistic_regression(image_shape=(300, 300), n_image_channels=3, n_out=44
 
     return learner
 
-if __name__ == '__main__':
+###########################################################################
+## main
+
+def main():
     lr = fit_logistic_regression()
     labels_dict, stub = build_submission_stub()
     predicted_values = lr.predict()
     if True:
-        return
+        return lr, predicted_values
 
     # something goes here: ??? stub['whaleCode'] = 1
     stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
     stub = stub[['Image', 'whileID']]
     stub.to_csv('../output/init_preds.csv', index=False)
+
+
+if __name__ == '__main__':
+    main()
