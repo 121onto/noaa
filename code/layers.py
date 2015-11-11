@@ -261,7 +261,7 @@ class LeNet(BaseLayer):
                  n_hidden, n_out):
 
         # reshapes the input
-        self.input = input.reshape((batch_size, n_image_channels) + image_shape)
+        self.input = input.reshape((-1, n_image_channels) + image_shape)
         self.n_layers = len(nkerns)
         self.input_shape = image_shape
         self.n_out = n_out

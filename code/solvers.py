@@ -1,6 +1,7 @@
 # Adapted from http://deeplearning.net/tutorial/
 from __future__ import (print_function, division)
 
+import math
 import timeit
 import numpy as np
 import theano
@@ -247,7 +248,7 @@ class SupervisedRandomMSGD(MiniBatchSGD):
 
         self.rng = rng
 
-        super(SupervisedMSGD, self).__init__(
+        super(SupervisedRandomMSGD, self).__init__(
             index, x, y, batch_size, learning_rate,
             datasets, outpath, learner, cost)
 

@@ -10,7 +10,7 @@ import theano.tensor as T
 
 from utils import load_data, display_results, build_submission_stub
 from layers import LeNet
-from solvers import SupervisedMSGD
+from solvers import SupervisedMSGD, SupervisedRandomMSGD
 
 ###########################################################################
 ## config
@@ -20,7 +20,7 @@ SEED = 1234
 ###########################################################################
 ## main
 
-def fit_lenet(image_shape=(300, 300), n_image_channels=3,
+def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=False,
               datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
               filter_shapes=[(5, 5),(5,5),(3,3)], nkerns=(6, 6, 10),
               pool_sizes=[(2, 2), (2, 2), (2, 2)],
@@ -50,17 +50,31 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3,
         + L1_reg * classifier.L1
         + L2_reg * classifier.L2
     )
-    learner = SupervisedMSGD(
-        index,
-        x,
-        y,
-        batch_size,
-        learning_rate,
-        load_data(datasets),
-        outpath,
-        classifier,
-        cost
-    )
+    if randomize:
+        learner = SupervisedRandomMSGD(
+            index,
+            x,
+            y,
+            batch_size,
+            learning_rate,
+            load_data(datasets),
+            outpath,
+            classifier,
+            cost,
+            rng=rng.RandomState(SEED)
+        )
+    else:
+        learner = SupervisedMSGD(
+            index,
+            x,
+            y,
+            batch_size,
+            learning_rate,
+            load_data(datasets),
+            outpath,
+            classifier,
+            cost
+        )
 
     best_validation_loss, best_iter, epoch, elapsed_time = learner.fit(
         n_epochs=n_epochs,
