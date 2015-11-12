@@ -19,6 +19,19 @@ def relu(x):
 ###########################################################################
 ## base layer
 
+def _dropout_from_layer(rng, layer, p):
+    """source https://github.com/mdenil/dropout/blob/master/mlp.py
+    """
+    srng = theano.tensor.shared_randomstreams.RandomStreams(
+        rng.randint(999999))
+    # p=1-p because 1's indicate keep and p is prob of dropping
+    mask = srng.binomial(n=1, p=1-p, size=layer.shape)
+    # The cast is important because
+    # int * float32 = float64 which pulls things off the gpu
+    output = layer * T.cast(mask, theano.config.floatX)
+    return output
+
+
 def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=None, dist='uniform'):
     if dist=='uniform':
         rtn = np.asarray(
@@ -74,7 +87,9 @@ class BaseLayer(object):
 
 class HiddenLayer(BaseLayer):
 
-    def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=relu):
+    def __init__(self, rng, input, n_in, n_out,
+                 W=None, b=None, activation=relu,
+                 with_dropout=True, dropout_rate=0.5):
 
         self.input = input
         W_shape = (n_in, n_out)
@@ -119,6 +134,8 @@ class HiddenLayer(BaseLayer):
             #else 1.7159 * activation( (2./3) * lin_output) if activation == T.tanh # transformation
             else activation(lin_output)
         )
+        if with_dropout:
+            self.output = _dropout_from_layer(rng, self.output, p=self.dropout_rate)
 
         self.L1 = abs(self.W).sum()
         self.L2 = abs(self.W ** 2).sum()
@@ -259,7 +276,8 @@ class ConvolutionLayer(BaseLayer):
                  feature_maps_in, feature_maps_out,
                  filter_shape, input_shape, batch_size,
                  pool_size=None, pool_ignore_border=True,
-                 W=None, b=None, activation=relu):
+                 W=None, b=None, activation=relu,
+                 with_dropout=True, dropout_rate=0.5):
 
         self.input = input
 
@@ -317,6 +335,8 @@ class ConvolutionLayer(BaseLayer):
             lin_output if activation is None
             else activation(lin_output)
         )
+        if with_dropout:
+            self.output = _dropout_from_layer(rng, self.output, p=self.dropout_rate)
 
         self.L1 = abs(self.W).sum()
         self.L2 = abs(self.W ** 2).sum()
