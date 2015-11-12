@@ -4,6 +4,7 @@ from __future__ import (print_function, division)
 import numpy as np
 import numpy.random as rng
 import theano.tensor as T
+from theano.tensor.shared_randomstreams import RandomStreams
 
 ###########################################################################
 ## local imports

@@ -10,13 +10,16 @@ from theano.tensor.signal import downsample
 from theano.tensor.shared_randomstreams import RandomStreams
 
 ###########################################################################
-## base layer
+## activation functions
 
 def relu(x):
     return T.switch(x<0, 0, x)
 
 
-def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=rng, dist='uniform'):
+###########################################################################
+## base layer
+
+def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=None, dist='uniform'):
     if dist=='uniform':
         rtn = np.asarray(
             rng.uniform(
@@ -26,8 +29,22 @@ def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=rng, dist='u
             ),
         dtype=dtype
         )
-    elif dist=='zero':
+    elif dist=='normal':
+        rtn = np.asarray(
+            rng.normal(
+                loc=0.0,
+                scale=0.01,
+                size=shape
+            ),
+        dtype=dtype
+        )
+    elif dist=='zeros':
         rtn = np.zeros(
+            shape,
+            dtype=dtype
+        )
+    elif dist=='ones':
+        rtn = np.ones(
             shape,
             dtype=dtype
         )
@@ -35,6 +52,8 @@ def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=rng, dist='u
         raise NotImplementedError()
     return rtn
 
+###########################################################################
+## base layer
 
 class BaseLayer(object):
     def __init__(self):
@@ -55,7 +74,7 @@ class BaseLayer(object):
 
 class HiddenLayer(BaseLayer):
 
-    def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=T.tanh):
+    def __init__(self, rng, input, n_in, n_out, W=None, b=None, activation=relu):
 
         self.input = input
         W_shape = (n_in, n_out)
@@ -63,17 +82,15 @@ class HiddenLayer(BaseLayer):
 
         if W is None:
             # suggested initial weights larger for sigmoid activiation
-            W_scale = 24. if (activation == theano.tensor.nnet.sigmoid) else 6.
-            W_scale = np.sqrt(W_scale / (n_in + n_out))
             W = theano.shared(
-                value=initialize_tensor(W_scale, W_shape, theano.config.floatX, rng=rng, dist='uniform'),
+                value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='normal'),
                 name='W',
                 borrow=True
             )
 
         if b is None:
             b = theano.shared(
-                value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+                value=initialize_tensor(None, b_shape, theano.config.floatX, dist='ones'),
                 name='b',
                 borrow=True
             )
@@ -83,12 +100,12 @@ class HiddenLayer(BaseLayer):
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
@@ -110,7 +127,7 @@ class HiddenLayer(BaseLayer):
 ## Logistic regression
 
 class LogisticRegression(BaseLayer):
-    def __init__(self, input, n_in, n_out):
+    def __init__(self, rng, input, n_in, n_out):
         """
         Parameters
         ----------
@@ -125,24 +142,24 @@ class LogisticRegression(BaseLayer):
         b_shape = (n_out,)
 
         self.W = theano.shared(
-            value=np.zeros(W_shape, dtype=theano.config.floatX),
+            value=initialize_tensor(None, W_shape, dtype=theano.config.floatX, rng=rng, dist='normal'),
             name='W',
             borrow=True
         )
         self.b = theano.shared(
-            value=np.zeros(b_shape, dtype=theano.config.floatX),
+            value=initialize_tensor(None, b_shape, dtype=theano.config.floatX, dist='zeros'),
             name='b',
             borrow=True
         )
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
@@ -211,9 +228,10 @@ class MLP(BaseLayer):
             input=input,
             n_in=n_in,
             n_out=n_hidden,
-            activation=T.tanh
+            activation=relu
         )
         self.log_reg_layer = LogisticRegression(
+            rng=rng,
             input=self.hidden_layer.output,
             n_in=n_hidden,
             n_out=n_out
@@ -241,7 +259,7 @@ class ConvolutionLayer(BaseLayer):
                  feature_maps_in, feature_maps_out,
                  filter_shape, input_shape, batch_size,
                  pool_size=None, pool_ignore_border=True,
-                 W=None, b=None, activation=T.tanh):
+                 W=None, b=None, activation=relu):
 
         self.input = input
 
@@ -249,17 +267,14 @@ class ConvolutionLayer(BaseLayer):
         W_shape = (feature_maps_out, feature_maps_in) + filter_shape
         b_shape = (feature_maps_out,)
 
-        W_scale = 1.0/np.sqrt(feature_maps_in * reduce(np.multiply,filter_shape))
-        b_scale = 0.5
-
         if W is None:
             W = theano.shared(
-                initialize_tensor(W_scale, W_shape, rng=rng, dist='uniform'),
+                initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='normal'),
                 name='W'
             )
         if b is None:
             b = theano.shared(
-                initialize_tensor(b_scale, b_shape, rng=rng, dist='zero'),
+                initialize_tensor(None, b_shape, theano.config.floatX, dist='ones'),
                 name='b'
             )
 
@@ -268,12 +283,12 @@ class ConvolutionLayer(BaseLayer):
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, rng=rng, dist='zero'),
+            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )

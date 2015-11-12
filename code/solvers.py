@@ -27,7 +27,7 @@ def fit_msgd_early_stopping(datasets, outpath, n_batches,
     n_tn_batches, n_v_batches, n_tt_batches = n_batches
     tn_model, v_model = models
 
-    validation_frequency = min(n_tn_batches, patience/20)
+    validation_frequency = min(n_tn_batches, patience//20)
 
     # initialize some variables
     best_validation_loss = np.inf
@@ -66,6 +66,17 @@ def fit_msgd_early_stopping(datasets, outpath, n_batches,
                     best_validation_loss = this_validation_loss
                     best_iter = iter
 
+            else:
+                print(
+                    'epoch %i, minibatch %i/%i, minibatch average cost %f' %
+                    (
+                        epoch,
+                        minibatch_index + 1,
+                        n_tn_batches,
+                        minibatch_avg_cost
+                    )
+                )
+
 
             if patience <= iter:
                 done_looping = True
@@ -87,7 +98,7 @@ def fit_random_msgd_early_stopping(datasets, outpath, models, classifier,
     [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)] = datasets
     tn_model, v_model = models
 
-    validation_frequency = patience/200
+    validation_frequency = patience//200
 
     # initialize some variables
     best_validation_loss = np.inf
