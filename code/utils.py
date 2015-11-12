@@ -201,11 +201,11 @@ def make_shared(data, borrow=True):
     """
     x, y = data
     sx = theano.shared(
-        np.asarray(x, dtype=theano.config.floatX),
+        x,
         borrow=borrow
     )
     sy = theano.shared(
-        np.asarray(y, dtype=theano.config.floatX),
+        y,
         borrow=borrow
     )
     return sx, T.cast(sy, 'int32')
