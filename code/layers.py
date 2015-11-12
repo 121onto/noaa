@@ -15,11 +15,10 @@ from theano.tensor.shared_randomstreams import RandomStreams
 def relu(x):
     return T.switch(x<0, 0, x)
 
-
 ###########################################################################
-## base layer
+## helper functions
 
-def _dropout_from_layer(rng, layer, p):
+def dropout(rng, layer, p, training=True):
     """source https://github.com/mdenil/dropout/blob/master/mlp.py
     """
     srng = theano.tensor.shared_randomstreams.RandomStreams(
@@ -29,10 +28,10 @@ def _dropout_from_layer(rng, layer, p):
     # The cast is important because
     # int * float32 = float64 which pulls things off the gpu
     output = layer * T.cast(mask, theano.config.floatX)
-    return output
+    return output if training else 0.5 * layer
 
 
-def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=None, dist='uniform'):
+def initialize_tensor(shape, scale=None, dtype=theano.config.floatX, rng=None, dist='uniform'):
     if dist=='uniform':
         rtn = np.asarray(
             rng.uniform(
@@ -46,7 +45,7 @@ def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=None, dist='
         rtn = np.asarray(
             rng.normal(
                 loc=0.0,
-                scale=0.01,
+                scale=scale,
                 size=shape
             ),
         dtype=dtype
@@ -61,6 +60,7 @@ def initialize_tensor(scale, shape, dtype=theano.config.floatX, rng=None, dist='
             shape,
             dtype=dtype
         )
+        rtn = rtn if scale is None else rtn * scale
     else:
         raise NotImplementedError()
     return rtn
@@ -77,10 +77,10 @@ class BaseLayer(object):
             for v in self.params:
                 cPickle.dump(v.get_value(borrow=True), file, -1)
 
-    def load_params(self, path):
+    def load_params(self, path, scale=0.5):
         with open(path) as file:
             for v in self.params:
-                v.set_value(cPickle.load(file), borrow=True)
+                v.set_value(cPickle.load(file) * scale, borrow=True)
 
 ###########################################################################
 ## hidden
@@ -98,14 +98,14 @@ class HiddenLayer(BaseLayer):
         if W is None:
             # suggested initial weights larger for sigmoid activiation
             W = theano.shared(
-                value=initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='normal'),
+                value=initialize_tensor(W_shape, scale=0.01, dtype=theano.config.floatX, rng=rng, dist='normal'),
                 name='W',
                 borrow=True
             )
 
         if b is None:
             b = theano.shared(
-                value=initialize_tensor(None, b_shape, theano.config.floatX, dist='ones'),
+                value=initialize_tensor(b_shape, scale=0.01, dtype=theano.config.floatX, dist='ones'),
                 name='b',
                 borrow=True
             )
@@ -115,12 +115,12 @@ class HiddenLayer(BaseLayer):
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(b_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
@@ -135,7 +135,8 @@ class HiddenLayer(BaseLayer):
             else activation(lin_output)
         )
         if with_dropout:
-            self.output = _dropout_from_layer(rng, self.output, p=self.dropout_rate)
+            self.dropout_rate = dropout_rate
+            self.output = dropout(rng, self.output, p=dropout_rate)
 
         self.L1 = abs(self.W).sum()
         self.L2 = abs(self.W ** 2).sum()
@@ -159,24 +160,24 @@ class LogisticRegression(BaseLayer):
         b_shape = (n_out,)
 
         self.W = theano.shared(
-            value=initialize_tensor(None, W_shape, dtype=theano.config.floatX, rng=rng, dist='normal'),
+            value=initialize_tensor(W_shape, scale=0.01, dtype=theano.config.floatX, rng=rng, dist='normal'),
             name='W',
             borrow=True
         )
         self.b = theano.shared(
-            value=initialize_tensor(None, b_shape, dtype=theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(b_shape, scale=0.01, dtype=theano.config.floatX, dist='zeros'),
             name='b',
             borrow=True
         )
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(b_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
@@ -237,7 +238,7 @@ class LogisticRegression(BaseLayer):
 
 class MLP(BaseLayer):
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out):
+    def __init__(self, rng, input, n_in, n_hidden, n_out, with_dropout=True):
         self.input = input
 
         self.hidden_layer = HiddenLayer(
@@ -245,7 +246,8 @@ class MLP(BaseLayer):
             input=input,
             n_in=n_in,
             n_out=n_hidden,
-            activation=relu
+            activation=relu,
+            with_dropout=with_dropout
         )
         self.log_reg_layer = LogisticRegression(
             rng=rng,
@@ -287,12 +289,12 @@ class ConvolutionLayer(BaseLayer):
 
         if W is None:
             W = theano.shared(
-                initialize_tensor(None, W_shape, theano.config.floatX, rng=rng, dist='normal'),
+                initialize_tensor(W_shape, scale=0.01, dtype=theano.config.floatX, rng=rng, dist='normal'),
                 name='W'
             )
         if b is None:
             b = theano.shared(
-                initialize_tensor(None, b_shape, theano.config.floatX, dist='ones'),
+                initialize_tensor(b_shape, scale=0.1, dtype=theano.config.floatX, dist='ones'),
                 name='b'
             )
 
@@ -301,12 +303,12 @@ class ConvolutionLayer(BaseLayer):
         self.params = [self.W, self.b]
 
         v_W = theano.shared(
-            value=initialize_tensor(None, W_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
         v_b = theano.shared(
-            value=initialize_tensor(None, b_shape, theano.config.floatX, dist='zeros'),
+            value=initialize_tensor(b_shape, dtype=theano.config.floatX, dist='zeros'),
             name='v_W',
             borrow=True
         )
@@ -336,7 +338,8 @@ class ConvolutionLayer(BaseLayer):
             else activation(lin_output)
         )
         if with_dropout:
-            self.output = _dropout_from_layer(rng, self.output, p=self.dropout_rate)
+            self.dropout_rate = dropout_rate
+            self.output = dropout(rng, self.output, p=dropout_rate)
 
         self.L1 = abs(self.W).sum()
         self.L2 = abs(self.W ** 2).sum()
@@ -348,7 +351,7 @@ class LeNet(BaseLayer):
     def __init__(self, rng, input, batch_size,
                  image_shape, n_image_channels,
                  nkerns, filter_shapes, pool_sizes,
-                 n_hidden, n_out):
+                 n_hidden, n_out, with_dropout=True):
 
         # reshapes the input
         self.input = input.reshape((-1, n_image_channels) + image_shape)
@@ -381,7 +384,8 @@ class LeNet(BaseLayer):
                 input_shape=input_shape,
                 batch_size=batch_size,
                 pool_size=pool_sizes[i],
-                activation=relu
+                activation=relu,
+                with_dropout=with_dropout
             )
 
             self.convolution_layers.append(convolution)
@@ -397,7 +401,8 @@ class LeNet(BaseLayer):
             input=self.convolution_layers[-1].output.flatten(2),
             n_in=nkerns[-1] * reduce(np.multiply, input_shape),
             n_hidden=n_hidden,
-            n_out=self.n_out
+            n_out=self.n_out,
+            with_dropout=with_dropout
         )
 
         self.params.extend(self.mlp_layer.params)
@@ -415,3 +420,8 @@ class LeNet(BaseLayer):
         rtn = [i-f+1 for i, f in zip(input_shape, filter_shape)]
         rtn = tuple(np.divide(rtn, pool_size))
         return rtn
+
+
+    def scale_params(self, scale=0.5):
+        for v in self.params:
+            v.set_value(v.get_value(borrow=True) * scale, borrow=True)

@@ -34,7 +34,7 @@ def prompt_for_quit_or_timeout(msg='Stop execution?', timeout=2):
     return False
 
 ###########################################################################
-## data processing
+## preproc
 
 def build_submission_stub(csv_path='../data/train.csv', img_path='../data/imgs-proc/',
                     out_path='../output/submission_stub.csv'):
@@ -201,11 +201,11 @@ def make_shared(data, borrow=True):
     """
     x, y = data
     sx = theano.shared(
-        x,
+        np.asarray(x, dtype=theano.config.floatX),
         borrow=borrow
     )
     sy = theano.shared(
-        y,
+        np.asarray(y, dtype=theano.config.floatX),
         borrow=borrow
     )
     return sx, T.cast(sy, 'int32')
