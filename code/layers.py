@@ -18,7 +18,7 @@ def relu(x):
 ###########################################################################
 ## helper functions
 
-def dropout(rng, layer, p, training=True):
+def dropout(rng, layer, p=0.5):
     """source https://github.com/mdenil/dropout/blob/master/mlp.py
     """
     srng = theano.tensor.shared_randomstreams.RandomStreams(
