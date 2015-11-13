@@ -28,7 +28,7 @@ def dropout(rng, layer, p, training=True):
     # The cast is important because
     # int * float32 = float64 which pulls things off the gpu
     output = layer * T.cast(mask, theano.config.floatX)
-    return output if training else 0.5 * layer
+    return output
 
 
 def initialize_tensor(shape, scale=None, dtype=theano.config.floatX, rng=None, dist='uniform'):
