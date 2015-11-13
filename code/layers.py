@@ -113,6 +113,7 @@ class HiddenLayer(BaseLayer):
         self.W = W
         self.b = b
         self.params = [self.W, self.b]
+        self.weights = [self.W]
 
         v_W = theano.shared(
             value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
@@ -170,6 +171,7 @@ class LogisticRegression(BaseLayer):
             borrow=True
         )
         self.params = [self.W, self.b]
+        self.weights = [self.W]
 
         v_W = theano.shared(
             value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
@@ -257,6 +259,7 @@ class MLP(BaseLayer):
         )
 
         self.params = self.hidden_layer.params + self.log_reg_layer.params
+        self.weights = self.hidden_layer.weights + self.log_reg_layer.weights
         self.momentum = self.hidden_layer.momentum + self.log_reg_layer.momentum
 
         self.L1 = self.hidden_layer.L1 + self.log_reg_layer.L1
@@ -301,6 +304,7 @@ class ConvolutionLayer(BaseLayer):
         self.W = W
         self.b = b
         self.params = [self.W, self.b]
+        self.weights = [self.W]
 
         v_W = theano.shared(
             value=initialize_tensor(W_shape, dtype=theano.config.floatX, dist='zeros'),
@@ -362,6 +366,7 @@ class LeNet(BaseLayer):
         # build graphs
         self.convolution_layers = []
         self.params = []
+        self.weights = []
         self.momentum = []
         self.L1 = 0
         self.L2 = 0
@@ -390,6 +395,7 @@ class LeNet(BaseLayer):
 
             self.convolution_layers.append(convolution)
             self.params.extend(convolution.params)
+            self.weights.extend(convolution.weights)
             self.momentum.extend(convolution.momentum)
 
             self.L1 = self.L1 + convolution.L1
@@ -406,6 +412,7 @@ class LeNet(BaseLayer):
         )
 
         self.params.extend(self.mlp_layer.params)
+        self.weights.extend(mlp_layer.weights)
         self.momentum.extend(self.mlp_layer.momentum)
 
         self.L1 = self.L1 + self.mlp_layer.L1
@@ -422,6 +429,6 @@ class LeNet(BaseLayer):
         return rtn
 
 
-    def scale_params(self, scale=0.5):
-        for v in self.params:
+    def scale_weights(self, scale=0.5):
+        for v in self.weights:
             v.set_value(v.get_value(borrow=True) * scale, borrow=True)
