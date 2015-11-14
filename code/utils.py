@@ -85,7 +85,7 @@ def plot_images(image_arrays, image_names):
 def plot_whales_by_id(
         csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
         img_path=os.path.join(BASE_DIR, 'data/imgs/'),
-        while_id='whale_78785'):
+        whale_id='whale_78785'):
 
     whale_index = pd.read_csv(csv_path)
     image_file_names = lookup_whale_images(whale_index, whale_id=whale_id)

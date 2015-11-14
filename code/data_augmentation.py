@@ -76,7 +76,7 @@ def transform_images(image_array, shape=(3, 300, 300)):
 ###########################################################################
 ## main
 
-from utils import (lookup_whale_images, load_images, plot_images)
+from utils import (lookup_whale_images, load_images, plot_images, plot_whales_by_id)
 
 def main(csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
          img_path=os.path.join(BASE_DIR, 'data/imgs/')):
