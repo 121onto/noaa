@@ -12,7 +12,7 @@ from theano.tensor.shared_randomstreams import RandomStreams
 
 from preproc import load_data, build_submission_stub
 from layers import LeNet
-from solvers import SupervisedMSGD, display_results
+from solvers import SupervisedRandomMSGD, display_results
 
 ###########################################################################
 ## local imports
@@ -28,7 +28,7 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=None,
               filter_shapes=[(5, 5), (3,3), (3,3)], nkerns=(32, 64, 128),
               pool_sizes=[(2, 2), (2, 2), (2, 2)],
               n_hidden=1000, n_out=447,
-              learning_rate=0.01, L1_reg=0.00, L2_reg=0.001,
+              learning_rate=0.01, L1_reg=0.00, L2_reg=0.00,
               n_epochs=1000, batch_size=128, patience=10000,
               patience_increase=2, improvement_threshold=0.995):
 

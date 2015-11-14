@@ -253,9 +253,9 @@ class MLP(BaseLayer):
 
     def __init__(self, rng, input, n_in, n_hidden, n_out,
                  activation=maxout, with_dropout=True):
-        self.input = input
 
-        self.hidden_layer = HiddenLayer(
+        self.input = input
+        self.hidden_layer1 = HiddenLayer(
             rng=rng,
             input=input,
             n_in=n_in,
@@ -263,19 +263,27 @@ class MLP(BaseLayer):
             activation=activation,
             with_dropout=with_dropout
         )
+        self.hidden_layer2 = HiddenLayer(
+            rng=rng,
+            input=self.hidden_layer1.output,
+            n_in=n_hidden,
+            n_out=n_hidden,
+            activation=activation,
+            with_dropout=with_dropout
+        )
         self.log_reg_layer = LogisticRegression(
             rng=rng,
-            input=self.hidden_layer.output,
+            input=self.hidden_layer2.output,
             n_in=n_hidden,
             n_out=n_out
         )
 
-        self.params = self.hidden_layer.params + self.log_reg_layer.params
-        self.weights = self.hidden_layer.weights + self.log_reg_layer.weights
-        self.momentum = self.hidden_layer.momentum + self.log_reg_layer.momentum
+        self.params = self.hidden_layer1.params + self.hidden_layer2.params + self.log_reg_layer.params
+        self.weights = self.hidden_layer1.weights + self.hidden_layer2.weights + self.log_reg_layer.weights
+        self.momentum = self.hidden_layer1.momentum + self.hidden_layer2.momentum + self.log_reg_layer.momentum
 
-        self.L1 = self.hidden_layer.L1 + self.log_reg_layer.L1
-        self.L2 = self.hidden_layer.L2 + self.log_reg_layer.L2
+        self.L1 = self.hidden_layer1.L1 + self.hidden_layer2.L1 + self.log_reg_layer.L1
+        self.L2 = self.hidden_layer1.L2 + self.hidden_layer2.L2 + self.log_reg_layer.L2
 
         self.negative_log_likelihood = self.log_reg_layer.negative_log_likelihood
         self.errors = self.log_reg_layer.errors
@@ -425,7 +433,7 @@ class LeNet(BaseLayer):
         )
 
         self.params.extend(self.mlp_layer.params)
-        self.weights.extend(mlp_layer.weights)
+        self.weights.extend(self.mlp_layer.weights)
         self.momentum.extend(self.mlp_layer.momentum)
 
         self.L1 = self.L1 + self.mlp_layer.L1

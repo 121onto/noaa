@@ -150,8 +150,8 @@ def compute_pca(data_path=os.path.join(BASE_DIR, 'data/memmap/'),
         ipca.partial_fit(X)
 
     eigenvalues, eigenvectors = np.linalg.eig(ipca.get_covariance())
-    eigenvalues.dump(os.path.join(out_path, 'eigenvalues.dat'))
-    eigenvectors.dump(os.path.join(out_path, 'eigenvectors.dat'))
+    eigenvalues.astype('float32').dump(os.path.join(out_path, 'eigenvalues.dat'))
+    eigenvectors.astype('float32').dump(os.path.join(out_path, 'eigenvectors.dat'))
 
 ###########################################################################
 ## i/o
@@ -179,8 +179,8 @@ def load_data(path=os.path.join(BASE_DIR, 'data/memmap/'), image_size=3*300*300)
 
 
 def load_pca(in_path = os.path.join(BASE_DIR, 'data/')):
-    eigenvalues = np.load(os.path.join(in_path, 'eigenvalues.dat'))
-    eigenvectors = np.load(os.path.join(in_path, 'eigenvectors.dat'))
+    eigenvalues = np.load(os.path.join(in_path, 'eigenvalues.dat')).astype('float32')
+    eigenvectors = np.load(os.path.join(in_path, 'eigenvectors.dat')).astype('float32')
     return eigenvalues, eigenvectors
 
 

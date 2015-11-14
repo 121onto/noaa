@@ -95,7 +95,7 @@ def fit_msgd_early_stopping(outpath, n_batches,
     return best_validation_loss, best_iter, epoch, (end_time - start_time)
 
 
-def fit_random_msgd_early_stopping(x, datasets, outpath, n_batches,
+def fit_random_msgd_early_stopping(x, datasets, outpath, n_batches, batch_size,
                                    models, classifier, n_epochs=1000,
                                    patience=5000, patience_increase=2,
                                    improvement_threshold=0.995):
@@ -124,7 +124,7 @@ def fit_random_msgd_early_stopping(x, datasets, outpath, n_batches,
                 end_time = timeit.default_timer()
                 return best_validation_loss, best_iter, epoch, (end_time - start_time)
 
-            minibatch = tn_x[minibatch_index * batch_size: (minibatch_index + 1) * batch_size]
+            minibatch = tn_x.get_value(borrow=True)[minibatch_index * batch_size: (minibatch_index + 1) * batch_size]
             minibatch = transform_images(minibatch)
             minibatch_avg_cost = tn_model(minibatch, minibatch_index)
 
@@ -306,7 +306,7 @@ class SupervisedRandomMSGD(MiniBatchSGD):
 
         self.index = index
 
-        super(SupervisedRandonMSGD, self).__init__(
+        super(SupervisedRandomMSGD, self).__init__(
             x, y, batch_size,
             datasets, outpath, learner, cost, updates,
             learning_rate, momentum, weight_decay)
@@ -316,7 +316,7 @@ class SupervisedRandomMSGD(MiniBatchSGD):
         v_x, v_y = self.datasets[1]
 
         tn_model = theano.function(
-            inputs=[theano.In(self.x, borrow=True), self.index],
+            inputs=[self.x, self.index],
             outputs=self.cost,
             updates=self.updates,
             givens={
@@ -342,6 +342,7 @@ class SupervisedRandomMSGD(MiniBatchSGD):
             self.datasets,
             self.outpath,
             self.n_batches,
+            self.batch_size,
             self.models,
             self.learner,
             n_epochs=n_epochs,

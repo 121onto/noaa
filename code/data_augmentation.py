@@ -87,7 +87,7 @@ def transform_images(image_array, shape=(3, 300, 300)):
         return np.expand_dims(transformed, axis=0)
 
     transformed_array = apply_parallel(f, image_array, chunks=(1, ) + image_array.shape[1:])
-    return transformed_array
+    return transformed_array.astype('float32')
 
 
 ###########################################################################

@@ -1,6 +1,8 @@
 from __future__ import (print_function, division)
 
 import os
+import sys
+import select
 from PIL import Image
 import pandas as pd
 import numpy as np
