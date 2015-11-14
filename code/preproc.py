@@ -178,7 +178,7 @@ def load_data(path=os.path.join(BASE_DIR, 'data/memmap/'), image_size=3*300*300)
     return [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)]
 
 
-def load_pca(pca_path = os.path.join(BASE_DIR, 'data/')):
+def load_pca(in_path = os.path.join(BASE_DIR, 'data/')):
     eigenvalues = np.load(os.path.join(in_path, 'eigenvalues.dat'))
     eigenvectors = np.load(os.path.join(in_path, 'eigenvectors.dat'))
     return eigenvalues, eigenvectors
