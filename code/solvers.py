@@ -13,17 +13,18 @@ from skimage import transform as tf
 ## local imports
 
 from config import SEED
+from data_augmentation import transform_images
+from utils import prompt_for_quit_or_timeout
 
 ###########################################################################
 ## solvers
 
-def fit_msgd_early_stopping(datasets, outpath, n_batches,
+def fit_msgd_early_stopping(outpath, n_batches,
                             models, classifier, n_epochs=1000,
                             patience=5000, patience_increase=2,
                             improvement_threshold=0.995):
 
     # unpack parameters
-    [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)] = datasets
     n_tn_batches, n_v_batches, n_tt_batches = n_batches
     tn_model, v_model = models
 
@@ -41,6 +42,11 @@ def fit_msgd_early_stopping(datasets, outpath, n_batches,
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
         for minibatch_index in xrange(n_tn_batches):
+            finished = prompt_for_quit_or_timeout(msg='Stop learning?', timeout=5)
+            if finished:
+                end_time = timeit.default_timer()
+                return best_validation_loss, best_iter, epoch, (end_time - start_time)
+
             minibatch_avg_cost = tn_model(minibatch_index)
             iter = (epoch - 1) * n_tn_batches + minibatch_index
 
@@ -89,16 +95,17 @@ def fit_msgd_early_stopping(datasets, outpath, n_batches,
     return best_validation_loss, best_iter, epoch, (end_time - start_time)
 
 
-def fit_random_msgd_early_stopping(datasets, outpath, models, classifier,
-                                   n_v_batches, n_epochs=1000,
+def fit_random_msgd_early_stopping(x, datasets, outpath, n_batches,
+                                   models, classifier, n_epochs=1000,
                                    patience=5000, patience_increase=2,
                                    improvement_threshold=0.995):
 
     # unpack parameters
     [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)] = datasets
+    n_tn_batches, n_v_batches, n_tt_batches = n_batches
     tn_model, v_model = models
 
-    validation_frequency = patience//200
+    validation_frequency = min(n_tn_batches, patience//20)
 
     # initialize some variables
     best_validation_loss = np.inf
@@ -111,39 +118,60 @@ def fit_random_msgd_early_stopping(datasets, outpath, models, classifier,
     epoch = 0
     while (epoch < n_epochs) and (not done_looping):
         epoch = epoch + 1
-        minibatch_avg_cost = tn_model()
+        for minibatch_index in xrange(n_tn_batches):
+            finished = prompt_for_quit_or_timeout(msg='Stop learning?', timeout=5)
+            if finished:
+                end_time = timeit.default_timer()
+                return best_validation_loss, best_iter, epoch, (end_time - start_time)
 
-        if (epoch + 1) % validation_frequency == 0:
-            validation_losses = [v_model(i) for i in xrange(n_v_batches)]
-            this_validation_loss = np.mean(validation_losses)
-            print(
-                'epoch %i, minibatch %i/%i, validation error %f, minibatch average cost %f' %
-                (
-                    epoch,
-                    minibatch_index + 1,
-                    n_tn_batches,
-                    this_validation_loss,
-                    minibatch_avg_cost
+            minibatch = tn_x[minibatch_index * batch_size: (minibatch_index + 1) * batch_size]
+            minibatch = transform_images(minibatch)
+            minibatch_avg_cost = tn_model(minibatch, minibatch_index)
+
+            iter = (epoch - 1) * n_tn_batches + minibatch_index
+            if (iter + 1) % validation_frequency == 0:
+                validation_losses = [v_model(i) for i in xrange(n_v_batches)]
+                this_validation_loss = np.mean(validation_losses)
+                print(
+                    'epoch %i, minibatch %i/%i, validation error %f, minibatch average cost %f' %
+                    (
+                        epoch,
+                        minibatch_index + 1,
+                        n_tn_batches,
+                        this_validation_loss,
+                        minibatch_avg_cost
                     )
-            )
+                )
 
-            if this_validation_loss < best_validation_loss:
-                if this_validation_loss < best_validation_loss * improvement_threshold:
-                    patience = max(patience, int(epoch * patience_increase))
+                if this_validation_loss < best_validation_loss:
+                    if this_validation_loss < best_validation_loss * improvement_threshold:
+                        patience = max(patience, iter * patience_increase)
 
-                best_validation_loss = this_validation_loss
-                best_epoch = epoch
+                    #best_params = copy.deepcopy(params)
+                    best_validation_loss = this_validation_loss
+                    best_iter = iter
+
+            else:
+                print(
+                    'epoch %i, minibatch %i/%i, minibatch average cost %f' %
+                    (
+                        epoch,
+                        minibatch_index + 1,
+                        n_tn_batches,
+                        minibatch_avg_cost
+                    )
+                )
 
 
-        if patience <= epoch:
-            done_looping = True
-            break
+            if patience <= iter:
+                done_looping = True
+                break
 
         if outpath is not None:
             classifier.save_params(path=outpath)
 
     end_time = timeit.default_timer()
-    return best_validation_loss, best_epoch, epoch, (end_time - start_time)
+    return best_validation_loss, best_iter, epoch, (end_time - start_time)
 
 
 def display_results(best_validation_loss, elapsed_time, epoch):
@@ -160,14 +188,13 @@ def display_results(best_validation_loss, elapsed_time, epoch):
 ## sdg via mini batches
 
 class MiniBatchSGD(object):
-    def __init__(self, index, x, y, batch_size,
+    def __init__(self, x, y, batch_size,
                  datasets, outpath, learner, cost, updates=None,
                  learning_rate=0.01, momentum=0.9, weight_decay=0.0005):
 
 
         self.x = x
         self.y = y
-        self.index = index
 
         self.datasets = datasets
         self.outpath = outpath
@@ -241,8 +268,10 @@ class SupervisedMSGD(MiniBatchSGD):
                  datasets, outpath, learner, cost, updates=None,
                  learning_rate=0.01, momentum=0.9, weight_decay=0.0005):
 
+        self.index = index
+
         super(SupervisedMSGD, self).__init__(
-            index, x, y, batch_size,
+            x, y, batch_size,
             datasets, outpath, learner, cost, updates,
             learning_rate, momentum, weight_decay)
 
@@ -268,3 +297,55 @@ class SupervisedMSGD(MiniBatchSGD):
             }
         )
         return [tn_model, v_model]
+
+
+class SupervisedRandomMSGD(MiniBatchSGD):
+    def __init__(self, index, x, y, batch_size,
+                 datasets, outpath, learner, cost, updates=None,
+                 learning_rate=0.01, momentum=0.9, weight_decay=0.0005):
+
+        self.index = index
+
+        super(SupervisedRandonMSGD, self).__init__(
+            x, y, batch_size,
+            datasets, outpath, learner, cost, updates,
+            learning_rate, momentum, weight_decay)
+
+    def _compile_models(self):
+        tn_x, tn_y = self.datasets[0]
+        v_x, v_y = self.datasets[1]
+
+        tn_model = theano.function(
+            inputs=[theano.In(self.x, borrow=True), self.index],
+            outputs=self.cost,
+            updates=self.updates,
+            givens={
+                self.y: tn_y[self.index * self.batch_size: (self.index + 1) * self.batch_size]
+            }
+        )
+        v_model = theano.function(
+            inputs=[self.index],
+            outputs=self.learner.errors(self.y),
+            givens={
+                self.x: v_x[self.index * self.batch_size: (self.index + 1) * self.batch_size],
+                self.y: v_y[self.index * self.batch_size: (self.index + 1) * self.batch_size]
+            }
+        )
+        return [tn_model, v_model]
+
+
+    def fit(self, patience=5000, n_epochs=1000,
+            patience_increase=2, improvement_threshold=0.995):
+
+        return fit_random_msgd_early_stopping(
+            self.x,
+            self.datasets,
+            self.outpath,
+            self.n_batches,
+            self.models,
+            self.learner,
+            n_epochs=n_epochs,
+            patience=patience,
+            patience_increase=patience_increase,
+            improvement_threshold=improvement_threshold
+        )

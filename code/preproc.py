@@ -153,7 +153,6 @@ def compute_pca(data_path=os.path.join(BASE_DIR, 'data/memmap/'),
     eigenvalues.dump(os.path.join(out_path, 'eigenvalues.dat'))
     eigenvectors.dump(os.path.join(out_path, 'eigenvectors.dat'))
 
-
 ###########################################################################
 ## i/o
 

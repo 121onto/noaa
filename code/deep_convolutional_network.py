@@ -53,7 +53,7 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=None,
         + L1_reg * classifier.L1
         + L2_reg * classifier.L2
     )
-    learner = SupervisedMSGD(
+    learner = SupervisedRandomMSGD(
         index,
         x,
         y,
