@@ -12,6 +12,7 @@ import theano
 import theano.tensor as T
 from PIL import Image
 from sklearn.utils import gen_batches
+from sklearn.decomposition import IncrementalPCA
 
 ###########################################################################
 ## config and local imports
@@ -119,46 +120,38 @@ def build_memmap_arrays(
         sys.exit('')
 
 
-def whiten_images(path=os.path.join(BASE_DIR, 'data/memmap/'),
-                  batch_size=500, n_components=500, image_size=3*300*300):
+def compute_pca(data_path=os.path.join(BASE_DIR, 'data/memmap/'),
+                  out_path=os.path.join(BASE_DIR, 'data/'),
+                  batch_size=500, image_size=3*300*300):
 
-    from pca import IncrementalZCA
+    ipca = IncrementalPCA(n_components=3, batch_size=batch_size)
 
-    tn_x_path = os.path.join(path, 'tn_x.dat')
-    v_x_path = os.path.join(path, 'v_x.dat')
-    tt_x_path = os.path.join(path, 'tt_x.dat')
+    path = os.path.join(data_path, 'tn_x.dat')
+    train = np.memmap(path, dtype=theano.config.floatX, mode='r+', shape=(4044,image_size))
+    n_samples, _ = train.shape
 
-    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='r+', shape=(4044,image_size))
-    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='r+', shape=(500,image_size))
-    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='r+', shape=(6925,image_size))
+    for batch_num, batch in enumerate(gen_batches(n_samples, batch_size)):
+        X = train[batch,:]
+        X = np.reshape(X, (X.shape[0], 3, int(image_size/3)))
+        X = X.transpose(0, 2, 1)
+        X = np.reshape(X, (reduce(np.multiply, X.shape[:2]), 3))
+        ipca.partial_fit(X)
 
-    # fit
-    print('Fitting on training data')
-    izca = IncrementalZCA(n_components=n_components, batch_size=batch_size)
-    izca.fit(tn_x)
-    print('Fitting on validation data')
-    n_samples, n_features = v_x.shape
-    for idx, batch in enumerate(gen_batches(n_samples, batch_size)):
-        izca.partial_fit(v_x[batch])
+    path = os.path.join(data_path, 'v_x.dat')
+    valid = np.memmap(path, dtype=theano.config.floatX, mode='r+', shape=(500,image_size))
+    n_samples, _ = valid.shape
 
-    # transform
-    n_samples, n_features = tn_x.shape
-    print('Transforming training data')
-    for batch in gen_batches(n_samples, batch_size):
-        tn_x[batch][:] = izca.transform(tn_x[batch])
-        np.memmap.flush(tn_x)
 
-    print('Transforming validation data')
-    n_samples, n_features = v_x.shape
-    for batch in gen_batches(n_samples, batch_size):
-        v_x[batch][:] = izca.transform(v_x[batch])
-        np.memmap.flush(v_x)
+    for batch_num, batch in enumerate(gen_batches(n_samples, batch_size)):
+        X = valid[batch,:]
+        X = np.reshape(X, (X.shape[0], 3, int(image_size/3)))
+        X = X.transpose(0, 2, 1)
+        X = np.reshape(X, (reduce(np.multiply, X.shape[:2]), 3))
+        ipca.partial_fit(X)
 
-    print('Transforming test data')
-    n_samples, n_features = tt_x.shape
-    for batch in gen_batches(n_samples, batch_size):
-        tt_x[batch][:] = izca.transform(tt_x[batch])
-        np.memmap.flush(tt_x)
+    eigenvalues, eigenvectors = np.linalg.eig(ipca.get_covariance())
+    eigenvalues.dump(os.path.join(out_path, 'eigenvalues.dat'))
+    eigenvectors.dump(os.path.join(out_path, 'eigenvectors.dat'))
 
 
 ###########################################################################
@@ -184,6 +177,12 @@ def load_data(path=os.path.join(BASE_DIR, 'data/memmap/'), image_size=3*300*300)
     tt_x, tt_y = make_shared((tt_x, tt_y))
 
     return [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)]
+
+
+def load_pca(pca_path = os.path.join(BASE_DIR, 'data/')):
+    eigenvalues = np.load(os.path.join(in_path, 'eigenvalues.dat'))
+    eigenvectors = np.load(os.path.join(in_path, 'eigenvectors.dat'))
+    return eigenvalues, eigenvectors
 
 
 def make_shared(data, borrow=True):

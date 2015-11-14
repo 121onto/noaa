@@ -12,12 +12,14 @@ import scipy
 ## local imports
 
 from apply_parallel import apply_parallel
+from preproc import load_pca
 from config import BASE_DIR, SEED
 
 ###########################################################################
-## local imports
+## config
 
 rng = RandomState(SEED)
+pca_val, pca_vec = load_pca()
 
 ###########################################################################
 ## geometric transforms
@@ -55,6 +57,7 @@ def resize_images(image_arrays, size=300):
 def transform_images(image_array, shape=(3, 300, 300)):
 
     def f(image):
+        # initialization
         rotation_angle = rng.uniform(low=-180, high=180)
         x_shift = rng.uniform(low=-5, high=5)
         y_shift = rng.uniform(low=-5, high=5)
@@ -64,6 +67,20 @@ def transform_images(image_array, shape=(3, 300, 300)):
             translation=(x_shift, y_shift)
         )
         image = image[0].reshape(shape).transpose(1, 2, 0)
+
+        # color transformation
+        trans = np.multiply(
+            pca_val,
+            np.array([
+                rng.normal(loc=0.0, scale=0.02),
+                rng.normal(loc=0.0, scale=0.02),
+                rng.normal(loc=0.0, scale=0.02)
+            ])
+        )
+        trans = np.dot(pca_vec, trans)
+        image = image + trans
+
+        # geometric transformation
         transformed = tf.rotate(image, angle=rotation_angle)
         transformed = tf.warp(transformed, tr_scale_trans)
         transformed = transformed.transpose(2, 0, 1).flatten()
