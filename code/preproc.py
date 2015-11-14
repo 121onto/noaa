@@ -1,387 +1,209 @@
-# (C) Kyle Kastner, June 2014
-# License: BSD 3 clause
+from __future__ import (print_function, division)
 
-from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.utils import gen_batches
-from scipy.linalg import eigh
-from scipy.linalg import svd
+import os
+import sys
+import gzip
+import select
+import cPickle
+import random
 import numpy as np
+import pandas as pd
+import theano
+import theano.tensor as T
+from PIL import Image
+from sklearn.utils import gen_batches
 
-# From sklearn master
-def svd_flip(u, v, u_based_decision=True):
-    """Sign correction to ensure deterministic output from SVD.
+###########################################################################
+## config and local imports
 
-    Adjusts the columns of u and the rows of v such that the loadings in the
-    columns in u that are largest in absolute value are always positive.
+from utils import prompt_for_quit_or_timeout
+from config import SEED, BASE_DIR
+
+###########################################################################
+## submissions
+
+def build_submission_stub(
+        csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
+        img_path=os.path.join(BASE_DIR, 'data/imgs-proc/'),
+        out_path=os.path.join(BASE_DIR, 'output/submission_stub.csv')):
+
+    train = pd.read_csv(csv_path)
+    train_files = pd.unique(train['Image'].values)
+    train['whaleID'] = train['whaleID'].astype('category')
+    train['whaleCode'] = train['whaleID'].cat.codes
+    labels_dict = dict(zip(train.whaleCode, train.whaleID))
+
+    submission_stub = []
+    for idx, file in enumerate(sorted(os.listdir(img_path))):
+        if not file.startswith('w_'):
+            continue
+        if file.endswith('.jpg'):
+            if file not in train_files:
+                submission_stub.append(file)
+
+    frame = pd.DataFrame(submission_stub, columns=['Image'])
+    return labels_dict, frame
+
+
+###########################################################################
+## load data into memmap
+
+def build_memmap_arrays(
+        csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
+        img_path=os.path.join(BASE_DIR, 'data/imgs-proc/'),
+        out_path=os.path.join(BASE_DIR, 'data/memmap/'),
+        image_size=3*300*300):
+
+    train = pd.read_csv(csv_path)
+    train['whaleID'] = train['whaleID'].astype('category')
+    train['whaleID'] = train['whaleID'].cat.codes
+    labels_dict = dict(zip(train.Image, train.whaleID))
+
+    tn_x_path = os.path.join(out_path, 'tn_x.dat')
+    tn_y_path = os.path.join(out_path, 'tn_y.dat')
+    v_x_path = os.path.join(out_path, 'v_x.dat')
+    v_y_path = os.path.join(out_path, 'v_y.dat')
+    tt_x_path = os.path.join(out_path, 'tt_x.dat')
+    tt_y_path = os.path.join(out_path, 'tt_y.dat')
+
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='w+', shape=(4044,image_size))
+    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='w+', shape=(4044,))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='w+', shape=(500,image_size))
+    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='w+', shape=(500,))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='w+', shape=(6925,image_size))
+    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='w+', shape=(6925,))
+
+    # randomly allocate 500 samples to the validation dataset
+    v_batch = np.random.choice(range(4544), size=500, replace=False)
+    a_idx = 0
+    tn_idx = 0
+    v_idx = 0
+    tt_idx = 0
+
+    terminate = False
+    for idx, file in enumerate(sorted(os.listdir(img_path))):
+        if not file.startswith('w_'):
+            continue
+        if idx % 1000 == 0:
+            print(file)
+            np.memmap.flush(tn_x)
+            np.memmap.flush(v_x)
+            np.memmap.flush(tt_x)
+            terminate = prompt_for_quit_or_timeout()
+            if terminate:
+                print('Exiting gracefully...')
+                break
+            else:
+                print('Program will continue...')
+        if file.endswith('.jpg'):
+            with open(os.path.join(img_path,file), 'rb') as f:
+                im = Image.open(f)
+                im = np.asarray(im).T.flatten()
+
+                if file in labels_dict:
+                    if a_idx in v_batch:
+                        v_x[v_idx,:] = im[:]
+                        v_y[v_idx] = labels_dict[file]
+                        v_idx += 1
+                        a_idx += 1
+                    else:
+                        tn_x[tn_idx,:] = im[:]
+                        tn_y[tn_idx] = labels_dict[file]
+                        tn_idx += 1
+                        a_idx += 1
+                else:
+                    tt_x[tt_idx,:] = im[:]
+                    tt_idx += 1
+
+    if terminate:
+        sys.exit('')
+
+
+def whiten_images(path=os.path.join(BASE_DIR, 'data/memmap/'),
+                  batch_size=500, n_components=500, image_size=3*300*300):
+
+    from pca import IncrementalZCA
+
+    tn_x_path = os.path.join(path, 'tn_x.dat')
+    v_x_path = os.path.join(path, 'v_x.dat')
+    tt_x_path = os.path.join(path, 'tt_x.dat')
+
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='r+', shape=(4044,image_size))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='r+', shape=(500,image_size))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='r+', shape=(6925,image_size))
+
+    # fit
+    print('Fitting on training data')
+    izca = IncrementalZCA(n_components=n_components, batch_size=batch_size)
+    izca.fit(tn_x)
+    print('Fitting on validation data')
+    n_samples, n_features = v_x.shape
+    for idx, batch in enumerate(gen_batches(n_samples, batch_size)):
+        izca.partial_fit(v_x[batch])
+
+    # transform
+    n_samples, n_features = tn_x.shape
+    print('Transforming training data')
+    for batch in gen_batches(n_samples, batch_size):
+        tn_x[batch][:] = izca.transform(tn_x[batch])
+        np.memmap.flush(tn_x)
+
+    print('Transforming validation data')
+    n_samples, n_features = v_x.shape
+    for batch in gen_batches(n_samples, batch_size):
+        v_x[batch][:] = izca.transform(v_x[batch])
+        np.memmap.flush(v_x)
+
+    print('Transforming test data')
+    n_samples, n_features = tt_x.shape
+    for batch in gen_batches(n_samples, batch_size):
+        tt_x[batch][:] = izca.transform(tt_x[batch])
+        np.memmap.flush(tt_x)
+
+
+###########################################################################
+## i/o
+
+def load_data(path=os.path.join(BASE_DIR, 'data/memmap/'), image_size=3*300*300):
+    tn_x_path = os.path.join(path, 'tn_x.dat')
+    tn_y_path = os.path.join(path, 'tn_y.dat')
+    v_x_path = os.path.join(path, 'v_x.dat')
+    v_y_path = os.path.join(path, 'v_y.dat')
+    tt_x_path = os.path.join(path, 'tt_x.dat')
+    tt_y_path = os.path.join(path, 'tt_y.dat')
+
+    tn_x = np.memmap(tn_x_path, dtype=theano.config.floatX, mode='r', shape=(4044,image_size))
+    tn_y = np.memmap(tn_y_path, dtype=theano.config.floatX, mode='r', shape=(4044,))
+    v_x = np.memmap(v_x_path, dtype=theano.config.floatX, mode='r', shape=(500,image_size))
+    v_y = np.memmap(v_y_path, dtype=theano.config.floatX, mode='r', shape=(500,))
+    tt_x = np.memmap(tt_x_path, dtype=theano.config.floatX, mode='r', shape=(6925,image_size))
+    tt_y = np.memmap(tt_y_path, dtype=theano.config.floatX, mode='r', shape=(6925,))
+
+    tn_x, tn_y = make_shared((tn_x, tn_y))
+    v_x , v_y  = make_shared((v_x, v_y))
+    tt_x, tt_y = make_shared((tt_x, tt_y))
+
+    return [(tn_x, tn_y), (v_x, v_y), (tt_x, tt_y)]
+
+
+def make_shared(data, borrow=True):
+    """
+    Function that loads the dataset into shared variables.
 
     Parameters
     ----------
-    u, v : ndarray
-        u and v are the output of `linalg.svd` or
-        `sklearn.utils.extmath.randomized_svd`, with matching inner dimensions
-        so one can compute `np.dot(u * s, v)`.
-
-    u_based_decision : boolean, (default=True)
-        If True, use the columns of u as the basis for sign flipping. Otherwise,
-        use the rows of v. The choice of which variable to base the decision on
-        is generally algorithm dependent.
-
-
-    Returns
-    -------
-    u_adjusted, v_adjusted : arrays with the same dimensions as the input.
+    data: tuple of numpy arrays
+      data = (x, y) where x is an np.array of predictors and y is an np array
+      of outcome variables
 
     """
-    if u_based_decision:
-        # columns of u, rows of v
-        max_abs_cols = np.argmax(np.abs(u), axis=0)
-        signs = np.sign(u[max_abs_cols, xrange(u.shape[1])])
-        u *= signs
-        v *= signs[:, np.newaxis]
-    else:
-        # rows of v, columns of u
-        max_abs_rows = np.argmax(np.abs(v), axis=1)
-        signs = np.sign(v[xrange(v.shape[0]), max_abs_rows])
-        u *= signs
-        v *= signs[:, np.newaxis]
-    return u, v
-
-def _batch_mean_variance_update(X, old_mean, old_variance, old_sample_count):
-    """Calculate an average mean update and a Youngs and Cramer variance update.
-
-    From the paper "Algorithms for computing the sample variance: analysis and
-    recommendations", by Chan, Golub, and LeVeque.
-
-    Parameters
-    ----------
-    X : array-like, shape (n_samples, n_features)
-        Data to use for variance update
-
-    old_mean : array-like, shape: (n_features,)
-
-    old_variance : array-like, shape: (n_features,)
-
-    old_sample_count : int
-
-    Returns
-    -------
-    updated_mean : array, shape (n_features,)
-
-    updated_variance : array, shape (n_features,)
-
-    updated_sample_count : int
-
-    References
-    ----------
-    T. Chan, G. Golub, R. LeVeque. Algorithms for computing the sample variance:
-        recommendations, The American Statistician, Vol. 37, No. 3, pp. 242-247
-
-    """
-    new_sum = X.sum(axis=0)
-    new_variance = X.var(axis=0) * X.shape[0]
-    old_sum = old_mean * old_sample_count
-    n_samples = X.shape[0]
-    updated_sample_count = old_sample_count + n_samples
-    partial_variance = old_sample_count / (n_samples * updated_sample_count) * (
-        n_samples / old_sample_count * old_sum - new_sum) ** 2
-    unnormalized_variance = old_variance * old_sample_count + new_variance + \
-        partial_variance
-    return ((old_sum + new_sum) / updated_sample_count,
-            unnormalized_variance / updated_sample_count,
-            updated_sample_count)
-
-
-class _CovZCA(BaseEstimator, TransformerMixin):
-    def __init__(self, n_components=None, bias=.1, copy=True):
-        self.n_components = n_components
-        self.bias = bias
-        self.copy = copy
-
-    def fit(self, X, y=None):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-        n_samples, n_features = X.shape
-        self.mean_ = np.mean(X, axis=0)
-        X -= self.mean_
-        U, S, VT = svd(np.dot(X.T, X) / n_samples, full_matrices=False)
-        components = np.dot(VT.T * np.sqrt(1.0 / (S + self.bias)), VT)
-        self.components_ = components[:self.n_components]
-        return self
-
-    def transform(self, X):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-        X -= self.mean_
-        X_transformed = np.dot(X, self.components_.T)
-        return X_transformed
-
-
-class ZCA(BaseEstimator, TransformerMixin):
-    """
-    Identical to CovZCA up to scaling due to lack of division by n_samples
-    S ** 2 / n_samples should correct this but components_ come out different
-    though transformed examples are identical.
-    """
-    def __init__(self, n_components=None, bias=.1, copy=True):
-        self.n_components = n_components
-        self.bias = bias
-        self.copy = copy
-
-    def fit(self, X, y=None):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-        n_samples, n_features = X.shape
-        self.mean_ = np.mean(X, axis=0)
-        X -= self.mean_
-        U, S, VT = svd(X, full_matrices=False)
-        components = np.dot(VT.T * np.sqrt(1.0 / (S ** 2 + self.bias)), VT)
-        self.components_ = components[:self.n_components]
-        return self
-
-    def transform(self, X):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-            X = np.copy(X)
-        X -= self.mean_
-        X_transformed = np.dot(X, self.components_.T)
-        return X_transformed
-
-class IncrementalCovZCA(BaseEstimator, TransformerMixin):
-    def __init__(self, n_components=None, batch_size=None, bias=.1,
-                 scale_by=1., copy=True):
-        self.n_components = n_components
-        self.batch_size = batch_size
-        self.bias = bias
-        self.scale_by = scale_by
-        self.copy = copy
-        self.scale_by = float(scale_by)
-        self.mean_ = None
-        self.covar_ = None
-        self.n_samples_seen_ = 0.
-
-    def fit(self, X, y=None):
-        self.mean_ = None
-        self.covar_ = None
-        self.n_samples_seen_ = 0.
-        n_samples, n_features = X.shape
-        if self.batch_size is None:
-            self.batch_size_ = 5 * n_features
-        else:
-            self.batch_size_ = self.batch_size
-        for batch in gen_batches(n_samples, self.batch_size_):
-            self.partial_fit(X[batch])
-        return self
-
-    def partial_fit(self, X):
-        self.components_ = None
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-            X = np.copy(X)
-        X /= self.scale_by
-        n_samples, n_features = X.shape
-        batch_mean = np.mean(X, axis=0)
-        # Doing this without subtracting mean results in numerical instability
-        # will have to play some games to work around this
-        if self.mean_ is None:
-            X -= batch_mean
-            batch_covar = np.dot(X.T, X)
-            self.mean_ = batch_mean
-            self.covar_ = batch_covar
-            self.n_samples_seen_ += float(n_samples)
-        else:
-            prev_mean = self.mean_
-            prev_sample_count = self.n_samples_seen_
-            prev_scale = self.n_samples_seen_ / (self.n_samples_seen_
-                                                 + n_samples)
-            update_scale = n_samples / (self.n_samples_seen_ + n_samples)
-            self.mean_ = self.mean_ * prev_scale + batch_mean * update_scale
-
-            X -= batch_mean
-            # All of this correction is to minimize numerical instability in
-            # the dot product
-            batch_covar = np.dot(X.T, X)
-            batch_offset = (self.mean_ - batch_mean)
-            batch_adjustment = np.dot(batch_offset[None].T, batch_offset[None])
-            batch_covar += batch_adjustment * n_samples
-
-            mean_offset = (self.mean_ - prev_mean)
-            mean_adjustment = np.dot(mean_offset[None].T, mean_offset[None])
-            self.covar_ += mean_adjustment * prev_sample_count
-
-            self.covar_ += batch_covar
-            self.n_samples_seen_ += n_samples
-
-    def transform(self, X):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-            X = np.copy(X)
-        if self.components_ is None:
-            U, S, VT = svd(self.covar_ / self.n_samples_seen_,
-                           full_matrices=False)
-            components = np.dot(VT.T * np.sqrt(1.0 / (S + self.bias)), VT)
-            self.components_ = components[:self.n_components]
-        X /= self.scale_by
-        X -= self.mean_
-        X_transformed = np.dot(X, self.components_.T)
-        return X_transformed
-
-
-class IncrementalZCA(BaseEstimator, TransformerMixin):
-    def __init__(self, n_components=None, batch_size=None, bias=.1,
-                 scale_by=1., copy=True):
-        self.n_components = n_components
-        self.batch_size = batch_size
-        self.bias = bias
-        self.scale_by = scale_by
-        self.copy = copy
-        self.scale_by = float(scale_by)
-        self.n_samples_seen_ = 0.
-        self.mean_ = None
-        self.var_ = None
-        self.components_ = None
-
-    def fit(self, X, y=None):
-        self.n_samples_seen_ = 0.
-        self.mean_ = None
-        self.var_ = None
-        self.components_ = None
-        n_samples, n_features = X.shape
-        if self.batch_size is None:
-            self.batch_size_ = 5 * n_features
-        else:
-            self.batch_size_ = self.batch_size
-        for batch in gen_batches(n_samples, self.batch_size_):
-            self.partial_fit(X[batch])
-        return self
-
-    def partial_fit(self, X):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-            X = np.copy(X)
-        n_samples, n_features = X.shape
-        self.n_components_ = self.n_components
-        X /= self.scale_by
-        if self.components_ is None:
-            # This is the first pass through partial_fit
-            self.n_samples_seen_ = 0.
-            col_var = X.var(axis=0)
-            col_mean = X.mean(axis=0)
-            X -= col_mean
-            U, S, V = svd(X, full_matrices=False)
-            U, V = svd_flip(U, V, u_based_decision=False)
-        else:
-            col_batch_mean = X.mean(axis=0)
-            col_mean, col_var, n_total_samples = _batch_mean_variance_update(
-                X, self.mean_, self.var_, self.n_samples_seen_)
-            X -= col_batch_mean
-            # Build matrix of combined previous basis and new data
-            correction = np.sqrt((self.n_samples_seen_ * n_samples)
-                                  / n_total_samples)
-            mean_correction = correction * (self.mean_ - col_batch_mean)
-            X_combined = np.vstack((self.singular_values_.reshape((-1, 1)) *
-                                    self.components_,
-                                    X,
-                                    mean_correction))
-            U, S, V = svd(X_combined, full_matrices=False)
-            U, V = svd_flip(U, V, u_based_decision=False)
-
-        self.n_samples_seen_ += n_samples
-        self.components_ = V[:self.n_components_]
-        self.singular_values_ = S[:self.n_components_]
-        self.mean_ = col_mean
-        self.var_ = col_var
-
-    def transform(self, X):
-        if self.copy:
-            X = np.array(X, copy=self.copy)
-            X = np.copy(X)
-        X /= self.scale_by
-        X -= self.mean_
-        # forget storing the zca_components matrix
-        X_transformed = np.dot(X, self.components_.T *
-                               np.sqrt(1.0 / (self.singular_values_ ** 2 + self.bias)))
-        X_transformed = np.dot(X_transformed, self.components_)
-        return X_transformed
-
-
-if __name__ == "__main__":
-    from numpy.testing import assert_almost_equal
-    import matplotlib.pyplot as plt
-    from scipy.misc import lena
-    # scale_by is necessary otherwise float32 results are numerically unstable
-    # scale_by is still not enough to totally eliminate the error in float32
-    # for many, many iterations but it is very close
-    X = lena().astype('float32')
-    X_orig = np.copy(X)
-
-    # Check that covariance ZCA and data ZCA produce same results
-    czca = CovZCA()
-    zca = ZCA()
-    X_czca = czca.fit_transform(X)
-    X_zca = zca.fit_transform(X)
-    assert_almost_equal(abs(zca.components_), abs(czca.components_), 3)
-    raise ValueError()
-
-
-    random_state = np.random.RandomState(1999)
-    X = random_state.rand(2000, 512).astype('float64') * 255.
-    X_orig = np.copy(X)
-    scale_by = 1.
-    from sklearn.decomposition import PCA, IncrementalPCA
-    zca = ZCA(n_components=512, scale_by=scale_by)
-    pca = PCA(n_components=512)
-    izca = IncrementalZCA(n_components=512, batch_size=1000)
-    ipca = IncrementalPCA(n_components=512, batch_size=1000)
-    X_pca = pca.fit_transform(X)
-    X_zca = zca.fit_transform(X)
-    X_izca = izca.fit_transform(X)
-    X_ipca = ipca.fit_transform(X)
-    assert_almost_equal(abs(pca.components_), abs(ipca.components_), 3)
-    from IPython import embed; embed()
-    assert_almost_equal(abs(zca.components_), abs(izca.zca_components_), 3)
-
-    for batch_size in [512, 128]:
-        print("Testing batch size %i" % batch_size)
-        izca = IncrementalZCA(batch_size=batch_size, scale_by=scale_by)
-        # Test that partial fit over subset has the same mean!
-        zca.fit(X[:batch_size])
-        izca.partial_fit(X[:batch_size])
-        # Make sure data was not modified
-        assert_almost_equal(X[:batch_size], X_orig[:batch_size])
-        # Make sure single batch results match
-        assert_almost_equal(zca.mean_, izca.mean_, decimal=3)
-        print("Got here")
-
-        izca.fit(X[:100])
-        izca.partial_fit(X[100:200])
-        zca.fit(X[:200])
-        # Make sure 2 batch results match
-        assert_almost_equal(zca.mean_, izca.mean_, decimal=3)
-        print("Got here 2")
-        # Make sure the input array is not modified
-        assert_almost_equal(X, X_orig, decimal=3)
-        X_zca = zca.fit_transform(X)
-        X_izca = izca.fit_transform(X)
-        # Make sure the input array is not modified
-        assert_almost_equal(X, X_orig, decimal=3)
-        print("Got here 3")
-        # Make sure the means are equal
-        assert_almost_equal(zca.mean_, izca.mean_, decimal=3)
-        print("Got here 4")
-        # Make sure the components are equal
-        assert_almost_equal(X_zca, X_izca, decimal=3)
-    plt.imshow(X, cmap="gray")
-    plt.title("Original")
-    plt.figure()
-    plt.imshow(X_zca, cmap="gray")
-    plt.title("ZCA")
-    plt.figure()
-    plt.imshow(X_izca, cmap="gray")
-    plt.title("IZCA")
-    plt.figure()
-    plt.matshow(zca.components_)
-    plt.title("ZCA")
-    plt.figure()
-    plt.matshow(izca.components_)
-    plt.title("IZCA")
-    plt.show()
+    x, y = data
+    sx = theano.shared(
+        x,
+        borrow=borrow
+    )
+    sy = theano.shared(
+        y,
+        borrow=borrow
+    )
+    return sx, T.cast(sy, 'int32')

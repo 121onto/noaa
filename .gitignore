@@ -3,6 +3,7 @@ data/*
 !data/README.md
 output/*
 !output/README.md
+code/config.py
 
 # python stuff
 __pycache__/

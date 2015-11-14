@@ -10,9 +10,9 @@ from theano.tensor.shared_randomstreams import RandomStreams
 from skimage import transform as tf
 
 ###########################################################################
-## config
+## local imports
 
-SEED = 1234
+from config import SEED
 
 ###########################################################################
 ## solvers
@@ -145,6 +145,16 @@ def fit_random_msgd_early_stopping(datasets, outpath, models, classifier,
     end_time = timeit.default_timer()
     return best_validation_loss, best_epoch, epoch, (end_time - start_time)
 
+
+def display_results(best_validation_loss, elapsed_time, epoch):
+    print(
+        'Optimization complete with best validation score of %f'
+        % (best_validation_loss)
+    )
+    print(
+        'The code run for %d epochs, with %f epochs/sec'
+        % (epoch, 1. * epoch / (elapsed_time))
+    )
 
 ###########################################################################
 ## sdg via mini batches

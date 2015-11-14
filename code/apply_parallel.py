@@ -1,24 +1,28 @@
+'''
+Copyright (C) 2011, the scikit-image team
+All rights reserved.
+
+THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+Source: https://github.com/scikit-image/scikit-image
+Date: November 13, 2105
+'''
+
 from math import ceil
 from multiprocessing import cpu_count
-
+import dask.array as da
 
 def _get_chunks(shape, ncpu):
-    """Split the array into equal sized chunks based on the number of
-    available processors. The last chunk in each dimension absorbs the
-    remainder array elements if the number of CPUs does not divide evenly into
-    the number of array elements.
-
-    Examples
-    --------
-    >>> _get_chunks((4, 4), 4)
-    ((2, 2), (2, 2))
-    >>> _get_chunks((4, 4), 2)
-    ((2, 2), (4,))
-    >>> _get_chunks((5, 5), 2)
-    ((2, 3), (5,))
-    >>> _get_chunks((2, 4), 2)
-    ((1, 1), (4,))
-    """
     chunks = []
     nchunks_per_dim = int(ceil(ncpu ** (1./len(shape))))
 
@@ -43,44 +47,6 @@ def _get_chunks(shape, ncpu):
 
 def apply_parallel(function, array, chunks=None, depth=0, mode=None,
                  extra_arguments=(), extra_keywords={}):
-    """Map a function in parallel across an array.
-
-    Split an array into possibly overlapping chunks of a given depth and
-    boundary type, call the given function in parallel on the chunks, combine
-    the chunks and return the resulting array.
-
-    Parameters
-    ----------
-    function : function
-        Function to be mapped which takes an array as an argument.
-    array : numpy array
-        Array which the function will be applied to.
-    chunks : int, tuple, or tuple of tuples, optional
-        A single integer is interpreted as the length of one side of a square
-        chunk that should be tiled across the array.  One tuple of length
-        ``array.ndim`` represents the shape of a chunk, and it is tiled across
-        the array.  A list of tuples of length ``ndim``, where each sub-tuple
-        is a sequence of chunk sizes along the corresponding dimension. If
-        None, the array is broken up into chunks based on the number of
-        available cpus. More information about chunks is in the documentation
-        `here <https://dask.pydata.org/en/latest/array-design.html>`_.
-    depth : int, optional
-        Integer equal to the depth of the added boundary cells. Defaults to
-        zero.
-    mode : {'reflect', 'symmetric', 'periodic', 'wrap', 'nearest', 'edge'}, optional
-        type of external boundary padding.
-    extra_arguments : tuple, optional
-        Tuple of arguments to be passed to the function.
-    extra_keywords : dictionary, optional
-        Dictionary of keyword arguments to be passed to the function.
-
-    Notes
-    -----
-    Numpy edge modes 'symmetric', 'wrap', and 'edge' are converted to the
-    equivalent `dask` boundary modes 'reflect', 'periodic' and 'nearest',
-    respectively.
-    """
-    import dask.array as da
 
     if chunks is None:
         shape = array.shape

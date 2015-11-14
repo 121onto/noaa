@@ -1,6 +1,7 @@
 # Adapted from http://deeplearning.net/tutorial/
 from __future__ import (print_function, division)
 
+import os
 import numpy as np
 import numpy.random as rng
 import theano.tensor as T
@@ -9,20 +10,21 @@ from theano.tensor.shared_randomstreams import RandomStreams
 ###########################################################################
 ## local imports
 
-from utils import load_data, display_results, build_submission_stub
+from preproc import load_data, build_submission_stub
 from layers import LeNet
-from solvers import SupervisedMSGD
+from solvers import SupervisedMSGD, display_results
 
 ###########################################################################
-## config
+## local imports
 
-SEED = 1234
+from config import BASE_DIR, SEED
 
 ###########################################################################
 ## main
 
 def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=None,
-              datasets='../data/memmap/', outpath='../output/noaa_lenet.params',
+              datasets=os.path.join(BASE_DIR,'data/memmap/'),
+              outpath=os.path.join(BASE_DIR,'output/noaa_lenet.params'),
               filter_shapes=[(5, 5), (3,3), (3,3)], nkerns=(32, 64, 128),
               pool_sizes=[(2, 2), (2, 2), (2, 2)],
               n_hidden=1000, n_out=447,
@@ -78,16 +80,8 @@ def fit_lenet(image_shape=(300, 300), n_image_channels=3, randomize=None,
 
 def main():
     ln = fit_lenet()
-    predicted_values = ln.predict()
-    if True:
-        return ln, predicted_values
 
-    # something goes here: ??? stub['whaleCode'] = 1
-    labels_dict, stub = build_submission_stub()
-    stub['whileID'] = stub['whaleCode'].apply(lambda x: labels_dict[x])
-    stub = stub[['Image', 'whileID']]
-    stub.to_csv('../output/init_preds.csv', index=False)
-
+    # TODO: build output suitable for kaggle entry
 
 if __name__ == '__main__':
     main()

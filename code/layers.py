@@ -12,8 +12,19 @@ from theano.tensor.shared_randomstreams import RandomStreams
 ###########################################################################
 ## activation functions
 
-def relu(x):
-    return T.switch(x<0, 0, x)
+def relu(input):
+    return T.switch(input<0, 0, input)
+
+def maxout(input, size=1):
+    rtn = None
+    for i in xrange(size):
+        tmp = input[:,i::size]
+        if rtn is None:
+            rtn = tmp
+        else:
+            rtn = T.maximum(rtn, tmp)
+
+    return rtn
 
 ###########################################################################
 ## helper functions
@@ -88,7 +99,7 @@ class BaseLayer(object):
 class HiddenLayer(BaseLayer):
 
     def __init__(self, rng, input, n_in, n_out,
-                 W=None, b=None, activation=relu,
+                 W=None, b=None, activation=maxout,
                  with_dropout=True, dropout_rate=0.5):
 
         self.input = input
@@ -240,7 +251,8 @@ class LogisticRegression(BaseLayer):
 
 class MLP(BaseLayer):
 
-    def __init__(self, rng, input, n_in, n_hidden, n_out, with_dropout=True):
+    def __init__(self, rng, input, n_in, n_hidden, n_out,
+                 activation=maxout, with_dropout=True):
         self.input = input
 
         self.hidden_layer = HiddenLayer(
@@ -248,7 +260,7 @@ class MLP(BaseLayer):
             input=input,
             n_in=n_in,
             n_out=n_hidden,
-            activation=relu,
+            activation=activation,
             with_dropout=with_dropout
         )
         self.log_reg_layer = LogisticRegression(
@@ -408,6 +420,7 @@ class LeNet(BaseLayer):
             n_in=nkerns[-1] * reduce(np.multiply, input_shape),
             n_hidden=n_hidden,
             n_out=self.n_out,
+            activation=maxout,
             with_dropout=with_dropout
         )
 
