@@ -1,6 +1,7 @@
 # general
 data/*
 !data/README.md
+!data/annotations.json
 output/*
 !output/README.md
 code/config.py

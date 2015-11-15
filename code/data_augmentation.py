@@ -1,6 +1,7 @@
 from __future__ import (print_function, division)
 
 import os
+import operator
 import pandas as pd
 import numpy as np
 from skimage import transform as tf
@@ -90,10 +91,30 @@ def transform_images(image_array, shape=(3, 300, 300)):
     return transformed_array.astype('float32')
 
 
+def equalize_image(image_array):
+    from PIL import Image
+    im = Image.fromarray(np.uint8(image_array))
+    h = im.convert("L").histogram()
+    lut = []
+    for b in range(0, len(h), 256):
+        # step size
+        step = reduce(operator.add, h[b:b+256]) / 255
+        # create equalization lookup table
+        n = 0
+        for i in range(256):
+            lut.append(n / step)
+            n = n + h[i+b]
+
+    # map image through lookup table
+    return np.asarray(im.point(lut*3))
+
 ###########################################################################
 ## main
 
 from utils import (lookup_whale_images, load_images, plot_images, plot_whales_by_id)
+
+csv_path=os.path.join(BASE_DIR, 'data/train.csv')
+img_path=os.path.join(BASE_DIR, 'data/imgs/')
 
 def main(csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
          img_path=os.path.join(BASE_DIR, 'data/imgs/')):
