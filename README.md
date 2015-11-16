@@ -19,7 +19,7 @@ $ python build_head_detection_training_set.py
 $ opencv_createsamples -info head_examples.info -num 2000 -w 48 -h 48 -vec heads.vec
 # change -numPos and -numNeg to match the number of samples you generated
 $ opencv_traincascade -data heads -vec heads.vec -bg head_backgrounds.info \
-    -numPos 1875 -numNeg 8000 -numStages 10 -w 48 -h 48 -featureType HAAR -mode ALL \
+    -numPos 1700 -numNeg 8000 -numStages 10 -w 48 -h 48 -featureType HAAR -mode ALL \
     -precalcValBufSize 2048 -precalcIdxBufSize 2048
 ```
 
