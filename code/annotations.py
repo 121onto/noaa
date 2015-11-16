@@ -5,7 +5,9 @@ import json
 import math
 import itertools
 import numpy as np
+from random import shuffle
 from PIL import Image
+import cv2
 
 from config import BASE_DIR
 
@@ -30,22 +32,32 @@ def modify_sloth_head_annotations():
         json.dump(annotations, o, indent=4, sort_keys=True)
 
 
-def write_opencv_info_file():
+def write_opencv_info_files():
     heads_p_path = os.path.join(BASE_DIR, 'data/heads_p')
     heads_n_path = os.path.join(BASE_DIR, 'data/heads_n')
     ex_path = os.path.join(BASE_DIR, 'data/head_examples.info')
     bg_path = os.path.join(BASE_DIR, 'data/head_backgrounds.info')
 
     with open(ex_path, 'w') as file:
-        for im in os.listdir(heads_p_path):
-            if file.endswith('.jpg'):
-                print(im + '\t1\t0 0 256 256', file=file)
+        images = os.listdir(heads_p_path)
+        shuffle(images)
+        for idx, im in enumerate(images):
+            if idx >= 2000:
+                break
+
+            if im.endswith('.jpg'):
+                print(os.path.join(heads_p_path, im) + '\t1\t0 0 256 256', file=file)
 
 
     with open(bg_path, 'w') as file:
-        for im in os.listdir(heads_n_path):
-            if file.endswith('.jpg'):
-                print(im, file=file)
+        images = os.listdir(heads_n_path)
+        shuffle(images)
+        for idx, im in enumerate(images):
+            if idx >= 8000:
+                break
+
+            if im.endswith('.jpg'):
+                print(os.path.join(heads_n_path, im), file=file)
 
 
 ###########################################################################
@@ -121,6 +133,7 @@ def crop_resize_image(file, box, mw=256, mh=256):
 
 
 def generate_examples_from_head_annotations():
+    # TODO: breaks with IndexError: list index out of range after cropping 2928 heads
     # Adapted from: https://github.com/Smerity/right_whale_hunt
     a_path = os.path.join(BASE_DIR, 'data/head_annotations.json')
     heads_p_path = os.path.join(BASE_DIR, 'data/heads_p')
@@ -157,33 +170,23 @@ def generate_examples_from_head_annotations():
             cropped.save(path)
 
 
-# TODO: move this to its own file where you do estimation and prediction with opencv
-def crop_fitted_heads():
-    if True:
-        return None
+def predict_crop_heads_from_cascade():
+    cascade_path = os.path.join(BASE_DIR, 'data/heads/cascade.xml')
+    heads_path = os.path.join(BASE_DIR, 'data/heads')
+    img_path = os.path.join(BASE_DIR, 'data/imgs')
 
-    # TODO: convert annotations to sloth format
-    in_path = os.path.join(BASE_DIR, 'data/head_region_predictions.json')
-    out_path = os.path.join(BASE_DIR, 'data/heads')
-
-    annotations = []
-    with open(in_path, 'r') as i:
-        annotations = json.load(i)
-
-    for a in annotations:
-        f = a['filename']
-        pp = [x for x in a['annotations']][0]
-
-        # crop and save positive examples
-        pp = smallest_enclosing_square(pp)
-        box = map(int, bounding_box_from_points(pp))
-        cropped = crop_resize_image(f, box)
-        path = os.path.join(heads_p_path, f.split('/')[-1])
-        ensure_dir(path)
-        cropped.save(path)
+    cascade = cv2.CascadeClassifier(cascade_path)
+    images = [os.path.join(img_path, f) for f in os.listdir(img_path) if f.endswith('.jpg')]
+    for in_file in images:
+        img = cv2.imread(in_file)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        crop = cascade.detectMultiScale(gray)[0]
+        head = img[crop[1]:crop[3],crop[0]:crop[2]]
+        out_file = os.path.join(heads_path, file)
+        cv2.imwrite(out_file, head)
 
 
 if __name__ == '__main__':
     modify_head_annotations()
     generate_examples_from_head_annotations()
-    write_opencv_info_file()
+    write_opencv_info_files()
