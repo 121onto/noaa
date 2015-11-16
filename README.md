@@ -15,18 +15,23 @@ Next `cd /your/base/directory/noaa/data` and run:
 
 ```bash
 $ python build_head_detection_training_set.py
-# change -num to match the number of samples you generated
-$ opencv_createsamples -info head_examples.info -num 1000 -w 48 -h 48 -vec heads.vec
-# change -num and -numNeg to match the number of samples you generated
+# change -numPos to match the number of samples you generated
+$ opencv_createsamples -info head_examples.info -num 2000 -w 48 -h 48 -vec heads.vec
+# change -numPos and -numNeg to match the number of samples you generated
 $ opencv_traincascade -data heads -vec heads.vec -bg head_backgrounds.info \
     -numPos 1875 -numNeg 8000 -numStages 10 -w 48 -h 48 -featureType HAAR -mode ALL \
     -precalcValBufSize 2048 -precalcIdxBufSize 2048
 ```
 
-Now `cd /your/base/directory/noaa/code` and run:
+Note that `-numPos` in `opencv_traincascade` should be smaller than `-num` from `opencv_createsamples`.  According to [this thread](http://code.opencv.org/issues/1834), the relationship is `num >= (numPos + (numStages-1) * (1 - minHitRate) * numPos) + S`, where `S` is the count of examples identified as background images during training.  Another comment on the thread suggests using `numPos = .85 * num`.
+
+When you've finished training the classifier, `cd /your/base/directory/noaa/code` and run `python -c 'from annotations import *; predict_crop_heads_from_cascade()'`.
+
+... additional steps.
+
+You are now ready to train the NNet.  First `cd /your/base/directory/noaa/code` and then  run:
 
 ```bash
-# additional steps
 $ python preproc.py
 $ python deep_convolutional_neural_network.py
 ```
