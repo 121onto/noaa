@@ -9,6 +9,9 @@ from random import shuffle
 from PIL import Image
 import cv2
 
+###########################################################################
+## local imports
+
 from config import BASE_DIR
 
 ###########################################################################
@@ -171,6 +174,7 @@ def generate_examples_from_head_annotations():
 
 
 def predict_crop_heads_from_cascade():
+    # TODO: test and debug
     cascade_path = os.path.join(BASE_DIR, 'data/heads/cascade.xml')
     heads_path = os.path.join(BASE_DIR, 'data/heads')
     img_path = os.path.join(BASE_DIR, 'data/imgs')
@@ -186,7 +190,10 @@ def predict_crop_heads_from_cascade():
         cv2.imwrite(out_file, head)
 
 
-if __name__ == '__main__':
+def main():
     modify_head_annotations()
     generate_examples_from_head_annotations()
     write_opencv_info_files()
+
+if __name__ == '__main__':
+    main()

@@ -13,8 +13,8 @@ from skimage import transform as tf
 ## local imports
 
 from config import SEED
-from data_augmentation import transform_images
-from utils import prompt_for_quit_or_timeout
+from noaa.nnet.data_augmentation import transform_images
+from noaa.utils import prompt_for_quit_or_timeout
 
 ###########################################################################
 ## solvers

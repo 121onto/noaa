@@ -12,8 +12,8 @@ import scipy
 ###########################################################################
 ## local imports
 
-from apply_parallel import apply_parallel
-from preproc import load_pca
+from noaa.nnet.apply_parallel import apply_parallel
+from noaa.nnet.preproc import load_pca
 from config import BASE_DIR, SEED
 
 ###########################################################################
@@ -108,13 +108,15 @@ def equalize_image(image_array):
     # map image through lookup table
     return np.asarray(im.point(lut*3))
 
+
 ###########################################################################
 ## main
 
-from utils import (lookup_whale_images, load_images, plot_images, plot_whales_by_id)
+from noaa.utils import (lookup_whale_images, load_images, plot_images, plot_whales_by_id)
 
-csv_path=os.path.join(BASE_DIR, 'data/train.csv')
-img_path=os.path.join(BASE_DIR, 'data/imgs/')
+if False: # Help for debugging
+    csv_path = os.path.join(BASE_DIR, 'data/train.csv')
+    img_path = os.path.join(BASE_DIR, 'data/imgs/')
 
 def main(csv_path=os.path.join(BASE_DIR, 'data/train.csv'),
          img_path=os.path.join(BASE_DIR, 'data/imgs/')):

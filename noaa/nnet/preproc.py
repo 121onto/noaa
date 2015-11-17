@@ -17,7 +17,7 @@ from sklearn.decomposition import IncrementalPCA
 ###########################################################################
 ## config and local imports
 
-from utils import prompt_for_quit_or_timeout
+from noaa.utils import prompt_for_quit_or_timeout
 from config import SEED, BASE_DIR
 
 ###########################################################################

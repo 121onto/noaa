@@ -4,7 +4,7 @@ data/*
 !data/annotations.json
 output/*
 !output/README.md
-code/config.py
+config.py
 
 # python stuff
 __pycache__/
@@ -25,4 +25,3 @@ __pycache__/
 # emacs
 *~
 \#*\#
-

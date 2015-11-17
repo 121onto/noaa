@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-src='/root/projects/noaa/data/imgs/'
-dst='/root/projects/noaa/data/imgs-proc/'
+src='/your/base/directory/noaa/data/imgs/'
+dst='/your/base/directory/noaa/data/imgs-proc/'
 
 for path in $(find "$src" -name "*.jpg"); do
     file=$(basename "$path")

@@ -10,9 +10,9 @@ from theano.tensor.shared_randomstreams import RandomStreams
 ###########################################################################
 ## local imports
 
-from preproc import load_data, build_submission_stub
-from layers import LeNet
-from solvers import SupervisedRandomMSGD, display_results
+from noaa.nnet.preproc import load_data, build_submission_stub
+from noaa.nnet.layers import LeNet
+from noaa.nnet.solvers import SupervisedRandomMSGD, display_results
 
 ###########################################################################
 ## local imports
