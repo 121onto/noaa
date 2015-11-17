@@ -34,18 +34,19 @@ Note that `-numPos` in `opencv_traincascade` should be smaller than `-num` from 
 
 ## NNet
 
-The current nnet does not use pre-processing other than shrinking the images.  To shrink the images, first edit `proc-imgs.sh` to match your directory structure.  Then `cd /your/base/directory/noaa/` and run `source noaa/proc-imgs.py`.
+The current nnet does not use pre-processing other than shrinking the images.  To shrink the images, first edit `proc-imgs.sh` to match your directory structure.  Then `cd /your/base/directory/noaa/` and run `source noaa/proc-imgs.sh`.
 
-Next, we'll load the processed data into memmap arrays.  `cd /your/base/directory/noaa/` and then run:
+Next, load the processed data into memmap arrays.  `cd /your/base/directory/noaa/` and run:
 
 ```bash
 $ python -c 'from noaa.nnet.preproc import build_memmap_arrays; build_memmap_arrays()'
 ```
 
-Finally we're ready to train the nnet.  `cd /your/base/directory/noaa/` and open python.  Train the model with:
+To train the nnet, first `cd /your/base/directory/noaa/`, open the python interpreter, and run the following commands:
 
 ```python
->>> from noaa.nnet.deep_convolutional_neural_network import fit_lenet; ln = fit_lenet()'
+>>> from noaa.nnet.deep_convolutional_neural_network import fit_lenet
+>>> ln = fit_lenet()'
 ```
 
 ## Notes
