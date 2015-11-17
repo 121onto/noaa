@@ -46,7 +46,7 @@ To train the nnet, first `cd /your/base/directory/noaa/`, open the python interp
 
 ```python
 >>> from noaa.nnet.deep_convolutional_neural_network import fit_lenet
->>> ln = fit_lenet()'
+>>> ln = fit_lenet()
 ```
 
 ## Notes
