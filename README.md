@@ -9,7 +9,7 @@ Ensure all dependencies are met.  You will need at least the equivalent of:
 - Anaconda (python 2.7)
 - OpenCV
 
-Download this repository and run `mv config-example.py config.py`.   Edit `config.py` to match your local directory structure (to replicate results, leave the `SEED` variable unchanged).
+Download this repository and `mv config-example.py config.py`.   Edit `config.py` to match your local directory structure (to replicate results, leave the `SEED` variable unchanged).
 
 Download the data files from [Kaggle](https://www.kaggle.com/c/noaa-right-whale-recognition/data) and unzip them into `/your/base/directory/noaa/data`.  Make sure to copy `w_7489.jpg` into `/your/base/directory/noaa/data/imgs/`.
 
