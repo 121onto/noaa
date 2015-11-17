@@ -32,7 +32,7 @@ Note that `-numPos` in `opencv_traincascade` should be smaller than `-num` from 
 
 ...
 
-## OpenCV
+## NNet
 
 The current nnet does not use pre-processing other than shrinking the images.  To shrink the images, first edit `proc-imgs.sh` to match your directory structure.  Then `cd /your/base/directory/noaa/` and run `source noaa/proc-imgs.py`.
 
