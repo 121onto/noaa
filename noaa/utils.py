@@ -54,32 +54,43 @@ def load_images(image_list,
 ###########################################################################
 ## plot
 
-def plot_images(image_arrays, image_names):
+def plot_images(image_arrays, dims=None, image_names=None, suptitle=None):
     if not isinstance(image_arrays, list):
         image_arrays=[image_arrays]
-        image_names=[image_names]
+        if image_names is not None:
+            image_names=[image_names]
 
     n = len(image_arrays)
-    height = int(np.sqrt(n))
-    width = int(np.ceil(n/height))
+    if dims is None:
+        width = int(np.sqrt(n))
+        height = int(np.ceil(n/width))
+    else:
+        height, width = dims
+
     fig, axes = plt.subplots(
         nrows=height,
         ncols=width,
-        figsize=(8, 8),
+        figsize=(16 * height / (width + height), 16 * width / (width + height)),
         sharex=True,
         sharey=True,
         subplot_kw={'adjustable':'box-forced'}
     )
-    if n > 1:
+    if width > 1 or height > 1:
         axes = axes.ravel()
     else:
         axes = [axes]
     for i, ax in enumerate(axes):
+        if i >= n:
+            break
         ax.imshow(image_arrays[i].astype('uint8'))
-        ax.set_title(image_names[i])
+        if image_names is not None:
+            ax.set_title(image_names[i])
         ax.axis('off')
 
     #fig.tight_layout(pad=0.0, w_pad=0.0, h_pad=0.0)
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=14)
+
     plt.show()
     plt.clf()
 
