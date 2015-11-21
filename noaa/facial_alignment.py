@@ -14,6 +14,7 @@ import cv2
 from scipy import ndimage
 from scipy.ndimage import binary_dilation
 from scipy.ndimage import binary_opening
+from scipy.ndimage import binary_closing
 from scipy.spatial import ConvexHull
 
 from skimage.transform import warp
@@ -23,6 +24,7 @@ from skimage.segmentation import slic
 from skimage.filters import threshold_yen
 import skimage.transform
 import skimage.feature
+from skimage import exposure
 
 import sklearn.utils
 from sklearn.cluster import KMeans
@@ -43,7 +45,7 @@ def add_image_to_image_generator(images, file=None):
     if file is not None:
         path = os.path.join(BASE_DIR, 'data/imgs/')
         path = os.path.join(path, file)
-        image = load_images(file).astype('int32')
+        image = load_images(path).astype('int32')
         images = itertools.chain([(path, image)], images)
 
     return images
@@ -173,10 +175,18 @@ def mask_largest_regions(mask, num_regions=2):
 ###########################################################################
 ## transforms
 
-def calculate_binary_opening_structure(binary_image):
+def calculate_binary_opening_structure(binary_image, weight=1, hollow=False):
     s = 1 + 10000 * (binary_image.sum()/binary_image.size) ** 1.4
-    s = max(5, 3 * np.log(s))
+    s = int(max(5, 3 * np.log(s) * weight))
+
+    if hollow:
+        structure = np.ones((s, s))
+        structure[s/4:3*s/4,s/4:3*s/4] = 0
+        return structure
+
     return np.ones((s, s))
+
+
 
 
 def compute_shape_regularity(data):
@@ -430,6 +440,20 @@ def extract_brightest_colors(image, thresh=3.5, verbose=True):
     return brightest_colors
 
 
+def extract_brightest_reds(image, thresh=100, verbose=True):
+    if verbose:
+        print('extracting reds')
+        print('threshold=%f' % (thresh, ))
+
+    image = image.astype('uint8')
+    ycrcb = cv2.cvtColor(image, cv2.COLOR_RGB2YCR_CB)
+    lower_red = np.array([0,thresh,0])
+    upper_red = np.array([255,255,255])
+    mask = cv2.inRange(ycrcb, lower_red, upper_red)
+    res = cv2.bitwise_and(image, image, mask=mask)
+    return res.astype('uint8')
+
+
 def list_colors_exclude_black(image):
     colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
     colors = colors[np.logical_and.reduce(colors[:,:] > 10, axis=1),:]
@@ -574,6 +598,56 @@ def inspect_gabor_patterns(file=None, dilation_iterations=40, num_regions=4):
             show_plot=True
         )
 
+
+def yen_mask_and_normalize(file=None):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original')
+        image_arrays.append(im)
+
+        # thresholded
+        yen = threshold_yen(im)
+        thresholded = threshold_by_channel(im, yen)[0]
+        titles.append('Yen Thresholded')
+        image_arrays.append(thresholded)
+
+        # masked and equalized
+        masked = im.copy()
+        masked[thresholded<=0] = 0
+
+        titles.append('Masked')
+        image_arrays.append(masked)
+
+        # equalize
+        from skimage.util import img_as_ubyte
+        equalized = masked.copy()
+        for chan in xrange(3):
+            img = masked[:,:,chan].astype('uint8')
+            range = (200, 255) if chan == 0 else (100, 155) if chan == 1 else (0, 55)
+            rescaled = exposure.rescale_intensity(img, in_range=range)
+            equalized[:,:,chan] = rescaled
+            break
+
+        titles.append('Equalied')
+        image_arrays.append(equalized)
+
+        # plot
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            show_plot=True,
+            suptitle=fn.split('/')[-1]
+        )
+        continue
+
+
 def inspect_color_quantization(file=None):
     images = image_generator()
     if file is not None:
@@ -584,16 +658,51 @@ def inspect_color_quantization(file=None):
         titles = []
 
         # plot original image
-        titles.append('Original Image')
+        titles.append('Original')
         image_arrays.append(im)
 
-        # segmented image
-        segmented = segment_image(im, n_segments=20, compactness=20, sigma=2)
-        titles.append('Segmented Image')
-        image_arrays.append(segmented)
+        yen = threshold_yen(im)
+        thresholded = threshold_by_channel(im, yen)[0]
+        titles.append('Yen Thresholded')
+        image_arrays.append(thresholded)
 
-        color = extract_colors_brightness(segmented, thresh=5.5)
-        bright = select_colors(segmented, [color])
+        # equalize
+        equalized = np.zeros_like(im)
+        for chan in xrange(3):
+            equalized[:,:,chan] = (exposure.equalize_hist(im[:,:,chan]) * 255).astype('uint8')
+
+        titles.append('Equalized')
+        image_arrays.append(equalized)
+
+        # experiments point to a reasonable threshold of 10 or 20
+        thresh = 160
+        reds_ycbcr = extract_brightest_reds(equalized, thresh=thresh, verbose=False)
+        titles.append('Reds Thresholded YCBCR %d' % thresh)
+        image_arrays.append(reds_ycbcr)
+
+        smoothed_ycbcr = reds_ycbcr.copy()
+        smoothed_ycbcr[:,:,0] = binary_closing(smoothed_ycbcr[:,:,0]>0, iterations=3) * 255
+        mask = (np.amax(smoothed_ycbcr, axis=2) > 0)
+        structure = calculate_binary_opening_structure(mask, weight=1, hollow=False)
+        mask = binary_opening(mask, structure=structure, iterations=1)
+        smoothed_ycbcr[mask <= 0,:] = 0
+
+        titles.append('Smoothed YCBCR Reds')
+        image_arrays.append(smoothed_ycbcr)
+
+        # plot
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            show_plot=True,
+            suptitle=fn.split('/')[-1]
+        )
+        continue
+
+        # segmented image
+        segmented = segment_image(smoothed_ycbcr, n_segments=3, compactness=100, sigma=2)
+        titles.append('Segmented')
+        image_arrays.append(segmented)
 
         titles.append('Least Gray Bright Region')
         image_arrays.append(bright)
