@@ -57,19 +57,40 @@ def load_images(image_list,
 ###########################################################################
 ## plot
 
-def plot_images(image_arrays, dims=None, titles=None, suptitle=None):
+def plot_images(image_arrays, dims=None, titles=None, show_plot=False, verbose=True):
+    if verbose:
+        print('drawing image plot')
+
     if not isinstance(image_arrays, list):
         image_arrays=[image_arrays]
         if titles is not None:
             titles=[titles]
 
     n = len(image_arrays)
-    if dims is None:
-        width = int(np.sqrt(n))
-        height = int(np.ceil(n/width))
-    else:
-        height, width = dims
+    for i in range(n):
+        plt.figure()
+        plt.imshow(image_arrays[i].astype('uint8'))
+        plt.axis('off')
+        if titles is not None:
+            plt.title(titles[i])
 
+    if show_plot:
+        plt.show()
+        plt.close()
+
+
+def subplot_images(images, titles=None, suptitle=False, show_plot=False, verbose=True):
+    if verbose:
+        print('drawing image subplot')
+
+    if not isinstance(images, list):
+        image_arrays=[images]
+        if titles is not None:
+            titles=[titles]
+
+    n = len(images)
+    width = int(round(np.sqrt(n), 0))
+    height = int(np.ceil(n/width))
     fig, axes = plt.subplots(
         nrows=height,
         ncols=width,
@@ -78,8 +99,9 @@ def plot_images(image_arrays, dims=None, titles=None, suptitle=None):
         sharey=True,
         subplot_kw={'adjustable':'box-forced'}
     )
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=14)
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=18)
+
 
     if width > 1 or height > 1:
         axes = axes.ravel()
@@ -87,17 +109,17 @@ def plot_images(image_arrays, dims=None, titles=None, suptitle=None):
         axes = [axes]
 
     for i, ax in enumerate(axes):
-        print(image_arrays[i].shape)
         if i >= n:
-            ax.imshow(np.zeros(image_arrays[0].shape).astype('uint8'))
+            ax.imshow(np.zeros(images[0].shape).astype('uint8'))
         else:
-            ax.imshow(image_arrays[i].astype('uint8'))
+            ax.imshow(images[i].astype('uint8'))
             if titles is not None: ax.set_title(titles[i])
 
         ax.axis('off')
 
-    plt.show()
-    plt.clf()
+    if show_plot:
+        plt.show()
+        plt.close()
 
 
 def plot_images_and_histograms(image_arrays, histograms,
@@ -143,7 +165,6 @@ def plot_images_and_histograms(image_arrays, histograms,
         plt.show()
 
     # plot histograms
-    plt.figure()
     if not isinstance(histograms, list):
         histograms=[histograms]
         if hist_titles is not None:
@@ -178,8 +199,6 @@ def plot_images_and_histograms(image_arrays, histograms,
             center = (bins[:-1] + bins[1:]) / 2
             ax.bar(center, hist, align='center', width=width)
             if hist_titles is not None: ax.set_title(hist_titles[i])
-
-
 
     plt.show()
     plt.clf()

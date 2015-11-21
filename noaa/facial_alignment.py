@@ -5,28 +5,39 @@ import json
 import math
 import itertools
 import numpy as np
+import pandas as pd
 from random import shuffle
 import matplotlib.pyplot as plt
-from skimage.segmentation import slic
-from skimage.filters import threshold_yen
-import skimage.transform
-import skimage.feature
 from PIL import Image, ImageDraw
+import cv2
+
 from scipy import ndimage
 from scipy.ndimage import binary_dilation
 from scipy.ndimage import binary_opening
 from scipy.spatial import ConvexHull
 
+from skimage.transform import warp
+from skimage.transform import SimilarityTransform
+from skimage import io, color
+from skimage.segmentation import slic
+from skimage.filters import threshold_yen
+import skimage.transform
+import skimage.feature
+
+import sklearn.utils
+from sklearn.cluster import KMeans
+
 ###########################################################################
 ## local imports
 
 from noaa.utils import (lookup_whale_images, load_images,
-                        plot_images, plot_images_and_histograms,
+                        plot_images, subplot_images,
+                        plot_images_and_histograms,
                         plot_whales_by_id)
-from config import BASE_DIR
+from config import BASE_DIR, SEED
 
 ###########################################################################
-## transforms
+## i/o
 
 def add_image_to_image_generator(images, file=None):
     if file is not None:
@@ -38,68 +49,11 @@ def add_image_to_image_generator(images, file=None):
     return images
 
 
-def calculate_binary_opening_structure(binary_image):
-    s = 1 + 10000 * (binary_image.sum()/binary_image.size) ** 1.4
-    s = max(5, 3 * np.log(s))
-    return np.ones((s, s))
-
-
 def binary2gray(binary_image):
     gray_image = np.zeros(binary_image.shape + (3,))
     for i in range(3):
         gray_image[binary_image > 0, i] = binary_image[binary_image > 0]
     return gray_image
-
-
-def mask_polygon(verts, shape):
-    img = Image.new('L', shape, 0)
-    ImageDraw.Draw(img).polygon(verts, outline=1, fill=1)
-    mask = np.array(img)
-
-    return mask.T
-
-
-def convex_hull_mask(data, mask=True):
-    segm = np.argwhere(data)
-    hull = ConvexHull(segm)
-    verts = [(segm[v,0], segm[v,1]) for v in hull.vertices]
-    if mask:
-        return mask_polygon(verts, data.shape)
-
-    return verts
-
-
-def compute_shape_regularity(data):
-    vals = np.unique(data)
-    d = dict()
-    for val in vals:
-        segm = data == val
-        hull = convex_hull_mask(segm)
-        d[val] = hull.sum()
-
-    return d
-
-
-def numpy_isin(array, keeps):
-    rtn = np.zeros(array.shape)
-    for k in keeps:
-        rtn[array==k] = k
-
-    return rtn
-
-
-def detect_regularity_outliers(d, retain=3, cut=None):
-    m = np.mean(d.values())
-    s = np.std(d.values())
-    if cut is not None:
-        return [v for k,v in d.iteritems() if (v-m) > cut * s]
-    for i in range(1000):
-        cnt = len([v for k,v in d.iteritems() if (v-m) > i * 0.1 * s])
-        if cnt < retain:
-            i -= 1
-            break
-
-    return {k:v for k,v in d.iteritems() if (v-m) > i * 0.1 * s}
 
 
 def image_generator():
@@ -114,36 +68,14 @@ def image_generator():
         yield im, image
 
 
-def smallest_partition(data, channel):
-    orig = data[:,:,channel].sum()
-    invs = np.abs(255-data[:,:,channel]).sum()
-    rtn = np.copy(data)
-    if invs < orig:
-        rtn[:,:,channel] = np.abs(rtn[:,:,channel] - 255)
-        return rtn
+###########################################################################
+## numpy utils
 
-    return rtn
+def numpy_isin(array, keeps):
+    rtn = np.zeros(array.shape)
+    for k in keeps:
+        rtn[array==k] = k
 
-
-def mask_largest_regions(mask, num_regions=2):
-    rtn = np.copy(mask)
-    regions, n_labels = ndimage.label(mask)
-    label_list = range(1, n_labels+1)
-    sizes = []
-    for label in label_list:
-        size = (regions==label).sum()
-        sizes.append((size, label))
-
-    sizes = sorted(sizes, reverse=True)
-    num_regions = min(num_regions, n_labels-1)
-    min_size = sizes[num_regions][0]
-
-    remove = np.ones(regions.shape)
-    for size, label in sizes:
-        if size < min_size:
-            remove[regions==label] = 0
-
-    rtn[remove==1] = 0
     return rtn
 
 
@@ -168,6 +100,108 @@ def extract_largest_regions(mask, num_regions=2):
             labels.append(label)
 
     return regions, labels
+
+
+def smallest_partition(data, channel):
+    orig = data[:,:,channel].sum()
+    invs = np.abs(255-data[:,:,channel]).sum()
+    rtn = np.copy(data)
+    if invs < orig:
+        rtn[:,:,channel] = np.abs(rtn[:,:,channel] - 255)
+        return rtn
+
+    return rtn
+
+
+def is_mad_outlier(points, thresh=3.5):
+    # source: http://stackoverflow.com/a/22357811/759442
+    if len(points.shape) == 1:
+        points = points[:,None]
+
+    median = np.median(points, axis=0)
+    diff = np.sum((points - median)**2, axis=-1)
+    diff = np.sqrt(diff)
+    med_abs_deviation = np.median(diff)
+
+    modified_z_score = 0.6745 * diff / med_abs_deviation
+
+    return modified_z_score > thresh
+
+###########################################################################
+## masks
+
+def mask_polygon(verts, shape):
+    img = Image.new('L', shape, 0)
+    ImageDraw.Draw(img).polygon(verts, outline=1, fill=1)
+    mask = np.array(img)
+
+    return mask.T
+
+
+def convex_hull_mask(data, mask=True):
+    segm = np.argwhere(data)
+    hull = ConvexHull(segm)
+    verts = [(segm[v,0], segm[v,1]) for v in hull.vertices]
+    if mask:
+        return mask_polygon(verts, data.shape)
+
+    return verts
+
+
+def mask_largest_regions(mask, num_regions=2):
+    rtn = np.copy(mask)
+    regions, n_labels = ndimage.label(mask)
+    label_list = range(1, n_labels+1)
+    sizes = []
+    for label in label_list:
+        size = (regions==label).sum()
+        sizes.append((size, label))
+
+    sizes = sorted(sizes, reverse=True)
+    num_regions = min(num_regions, n_labels-1)
+    min_size = sizes[num_regions][0]
+
+    remove = np.ones(regions.shape)
+    for size, label in sizes:
+        if size < min_size:
+            remove[regions==label] = 0
+
+    rtn[remove==1] = 0
+    return rtn
+
+
+###########################################################################
+## transforms
+
+def calculate_binary_opening_structure(binary_image):
+    s = 1 + 10000 * (binary_image.sum()/binary_image.size) ** 1.4
+    s = max(5, 3 * np.log(s))
+    return np.ones((s, s))
+
+
+def compute_shape_regularity(data):
+    vals = np.unique(data)
+    d = dict()
+    for val in vals:
+        segm = data == val
+        hull = convex_hull_mask(segm)
+        d[val] = hull.sum()
+
+    return d
+
+
+def detect_regularity_outliers(d, retain=3, cut=None):
+    m = np.mean(d.values())
+    s = np.std(d.values())
+    if cut is not None:
+        return [v for k,v in d.iteritems() if (v-m) > cut * s]
+    for i in range(1000):
+        cnt = len([v for k,v in d.iteritems() if (v-m) > i * 0.1 * s])
+        if cnt < retain:
+            i -= 1
+            break
+
+    return {k:v for k,v in d.iteritems() if (v-m) > i * 0.1 * s}
 
 
 def denoise_image(data, type=None):
@@ -212,7 +246,6 @@ def segmentation(retain=3, n_segments=20, compactness=20, sigma=0):
         plot_images([image, retained_segments], ['Original', 'Segmented'])
 
 
-
 def threshold_by_channel(image, threshold, n_channels=3):
     rtn = []
     for i in xrange(n_channels):
@@ -223,6 +256,9 @@ def threshold_by_channel(image, threshold, n_channels=3):
 
     return rtn
 
+
+###########################################################################
+## cropping
 
 def minimum_bounding_rectangle(verts, return_rotation_matrix=False, return_rotation_angle=False):
     pi2 = np.pi/2.
@@ -267,14 +303,335 @@ def minimum_bounding_rectangle(verts, return_rotation_matrix=False, return_rotat
     rtn[1,:] = np.dot([x2, y2], r)
     rtn[2,:] = np.dot([x2, y1], r)
     rtn[3,:] = np.dot([x1, y1], r)
+    rtn = tuple(tuple(pt) for pt in rtn.tolist())
 
     r = np.linalg.inv(r)
     angle = math.atan2(r[1,0], r[0,0])
+    r = tuple(tuple(el) for el in r.tolist())
     return rtn, r, angle
+
+
+def similarity_transform_from_mbr(verts, rot, angle, shape):
+    verts = np.array(verts)
+    rot = np.array(rot)
+    verts = np.dot(verts, rot).astype(int)
+    inv_rot = np.linalg.inv(rot)
+
+    # translation
+    xtrans = np.abs(min(0,np.min(verts[:,0])))
+    xtrans = xtrans if xtrans > 0 else shape[0] - max(np.max(verts[:,0]), shape[0])
+    ytrans = np.abs(min(0,np.min(verts[:,1])))
+    ytrans = ytrans if ytrans > 0 else shape[1] - max(np.max(verts[:,1]), shape[1])
+    translation = -1*np.dot(np.array([xtrans, ytrans]), rot.T).astype(int)
+
+    # crop window
+    xmax = np.max(verts[:,0]) + xtrans
+    xmin = np.min(verts[:,0]) + xtrans
+    ymax = np.max(verts[:,1]) + ytrans
+    ymin = np.min(verts[:,1]) + ytrans
+
+    # transform matrix
+    transform = np.eye(3)
+    transform[0:2,0:2] = rot.T
+    transform[0:2, 2] = [translation[1], translation[0]]
+
+    # return transform and window
+    transform = SimilarityTransform(matrix=transform)
+    corners = [xmin, xmax, ymin, ymax]
+    return transform, corners
+
+
+def rotate_crop_gray_image_from_mbr(image, verts, rot, angle):
+    transform, corners = similarity_transform_from_mbr(verts, rot, angle, image.shape)
+    xmin, xmax, ymin, ymax = corners
+
+    crop = warp(image, transform)
+    crop = crop[xmin:xmax, ymin:ymax]
+
+    return crop.astype('uint8')
+
+
+def rotate_crop_rgb_image_from_mbr(image, verts, rot, angle):
+    rgb_crop = None
+    shape = image.shape[:-1]
+    for i in range(3):
+        chan = np.zeros(shape)
+        chan[:,:] = image[:,:,i]
+        chan_crop = rotate_crop_gray_image_from_mbr(chan, verts, rot, angle)
+        if rgb_crop is None:
+            rgb_crop = np.zeros(chan_crop.shape + (3,), dtype='uint8')
+
+        rgb_crop[:,:,i] = chan_crop
+
+    return rgb_crop
+
+
+###########################################################################
+## color reduction
+
+
+def segment_image(image, n_segments=400, compactness=30, sigma=5, verbose=True):
+    if verbose:
+        print('segmenting image')
+        print('n_segments=%d, compactness=%d, sigma=%d' % (n_segments, compactness, sigma))
+
+    image = image.astype('float64')
+    labels = slic(image, compactness=compactness, n_segments=n_segments, sigma=sigma)
+    segmented = color.label2rgb(labels, image, kind='avg')
+    return  segmented.astype('uint8')
+
+
+def extract_colors_grays(image, n_grays=4, verbose=True):
+    if verbose:
+        print('extracting grays')
+        print('n_grays=%d' % (n_grays, ))
+
+    colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
+    inv_grayness = colors.std(axis=1)
+    brightness = colors.mean(axis=1)
+
+    grayest_colors = colors[inv_grayness.argsort()[:n_grays]]
+
+    darkest_gray = grayest_colors[grayest_colors.mean(axis=1).argsort()[0]]
+    mid_gray = grayest_colors[grayest_colors.mean(axis=1).argsort()[int(round(n_grays/2))]]
+    brightest_gray = grayest_colors[grayest_colors.mean(axis=1).argsort()[1]]
+
+
+    return darkest_gray, mid_gray, brightest_gray
+
+
+def extract_colors_brightness(image, thresh=3.5, verbose=True):
+    if verbose:
+        print('extracting intensities')
+        print('outlier threshold=%f' % (thresh, ))
+
+    colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
+    inv_grayness = colors.std(axis=1)
+    brightness = colors.mean(axis=1)
+
+    is_outlier = is_mad_outlier(brightness, thresh=thresh)
+    brightest_colors = colors[is_outlier]
+
+    least_gray = brightest_colors[np.newaxis, brightest_colors.std(axis=1).argsort()[-1]]
+
+    return brightest_colors
+
+
+def extract_brightest_colors(image, thresh=3.5, verbose=True):
+    if verbose:
+        print('extracting intensities')
+        print('outlier threshold=%f' % (thresh, ))
+
+    colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
+    brightness = colors.mean(axis=1)
+    is_outlier = is_mad_outlier(brightness, thresh=thresh)
+    brightest_colors = colors[is_outlier]
+
+    return brightest_colors
+
+
+def list_colors_exclude_black(image):
+    colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
+    colors = colors[np.logical_and.reduce(colors[:,:] > 10, axis=1),:]
+
+    return colors
+
+
+def select_colors(image, colors):
+    rtn = np.zeros_like(image)
+    for color in list(colors):
+        rtn[np.logical_and.reduce(image[:,:] == color, axis=2),:] = color
+
+    return rtn
+
+
+def quantize_colors(image, n_colors=3, n_samples=1000,
+                   max_iter=300, n_init=10, n_jobs=1,
+                   random_state=SEED, verbose=False, split=True):
+    if verbose:
+        print('color quantizing image')
+        print('n_colors=%d, n_samples=%d, n_init=%d' % (n_colors, n_samples, n_init))
+
+    w, h, d = image.shape; assert(d == 3)
+    pixels = image.reshape(w*h, d).astype('float64')
+    if n_samples is not None:
+        pixel_sample = sklearn.utils.shuffle(pixels, random_state=SEED)[:n_samples]
+    else:
+        pixel_sample = pixels
+
+    kmeans = KMeans(n_clusters=n_colors, max_iter=max_iter, n_init=n_init, n_jobs=n_jobs, random_state=random_state).fit(pixel_sample)
+    labels = kmeans.predict(pixels)
+    if not split:
+        quantized = np.zeros(image.shape, dtype='float64')
+        colors = kmeans.cluster_centers_.tolist()
+        label_idx = 0
+        for i in range(w):
+            for j in range(h):
+                quantized[i][j] = colors[labels[label_idx]]
+                label_idx += 1
+
+        quantized = quantized.astype('uint8')
+    else:
+        # TODO: debug this
+        quantized = [np.zeros(image.shape[:-1], dtype='float64')] * n_colors
+        colors = kmeans.cluster_centers_.tolist()
+        label_idx = 0
+        for i in range(w):
+            for j in range(h):
+                c = colors.index(colors[labels[label_idx]])
+                quantized[c][i][j] = 255
+                label_idx += 1
+
+        quantized = [binary2gray(im.astype('uint8')) for im in quantized]
+
+    return quantized
+
+
+###########################################################################
+## gabor filters
+
+def build_gabor_filters():
+    filters = []
+    ksize = 31
+    for theta in (np.pi * np.array(range(3)) / 3).tolist():
+        for lambd in [0.1, 0.2, 0.4]:
+            kern = cv2.getGaborKernel((ksize, ksize), 4.0, theta, lambd, 0.5, 0, ktype=cv2.CV_32F)
+            kern /= 1.5*kern.sum()
+            filters.append(kern)
+
+    return filters
+
+
+def apply_gabor_filters(image, filters):
+    results = []
+    for kernel in filters:
+        filtered = cv2.filter2D(image, cv2.CV_8UC3, kernel)
+        results.append(filtered)
+
+    return results
 
 
 ###########################################################################
 ## examine feature
+
+def inspect_gabor_patterns(file=None, dilation_iterations=40, num_regions=4):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    gabor_filters = build_gabor_filters()
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original Image')
+        image_arrays.append(im)
+
+        # segmented image
+        segmented = segment_image(im, n_segments=20, compactness=20, sigma=2)
+        titles.append('Segmented Image')
+        image_arrays.append(segmented)
+
+        # re-segment image
+        brightest_colors = extract_brightest_colors(segmented, thresh=3.5)
+        bright_regions = select_colors(segmented, brightest_colors)
+        resegmented = segmented.copy()
+        resegmented[bright_regions <= 0] = 0
+        resegmented = segment_image(resegmented, n_segments=5, compactness=30, sigma=2)
+        titles.append('Re-Segmented Image')
+        image_arrays.append(resegmented)
+
+        colors = list_colors_exclude_black(segmented)[[0, 4, 8, 12, 16]]
+        rgb_crops = []
+        rgb_labels = []
+        crop_titles = []
+        for color in list(colors):
+            mask = select_colors(segmented, [color]) > 0
+            x, y = ndimage.measurements.center_of_mass((mask[:,:,0] > 0).astype(int))
+            xmin = int(max(x-50,0))
+            xmax = int(min(x+50, im.shape[0]-1))
+            ymin = int(max(y-50,0))
+            ymax = int(min(y+50, im.shape[1]-1))
+            rgb_crops.append(im[xmin:xmax,ymin:ymax, :].copy())
+            rgb_labels.append(str(color))
+            crop_titles.append('Crop for Color ' + str(color))
+
+        subplot_images(
+            rgb_crops,
+            titles=crop_titles,
+            suptitle='Crops'
+        )
+
+        for crop, color in zip(rgb_crops, rgb_labels):
+            rgb_gabor = apply_gabor_filters(crop, gabor_filters)
+            subplot_images(rgb_gabor, suptitle='RGB Gabor Filters for Color ' + color)
+
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            suptitle=fn.split('/')[-1],
+            show_plot=True
+        )
+
+def inspect_color_quantization(file=None):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original Image')
+        image_arrays.append(im)
+
+        # segmented image
+        segmented = segment_image(im, n_segments=20, compactness=20, sigma=2)
+        titles.append('Segmented Image')
+        image_arrays.append(segmented)
+
+        color = extract_colors_brightness(segmented, thresh=5.5)
+        bright = select_colors(segmented, [color])
+
+        titles.append('Least Gray Bright Region')
+        image_arrays.append(bright)
+
+        d, m, b = extract_colors_grays(segmented, n_grays=6)
+        grays = select_colors(segmented, [d, m, b])
+
+        titles.append('Gray Regions of Varied Intensity')
+        image_arrays.append(grays)
+
+        quantized = quantize_colors(segmented, n_colors=3, n_samples=1000,
+                                    max_iter=300, n_init=10, n_jobs=1,
+                                    random_state=SEED, verbose=True, split=False)
+
+        titles.append('Quantized Image %d Colors' % 3)
+        image_arrays.append(quantized)
+
+        quantized = quantize_colors(segmented, n_colors=4, n_samples=1000,
+                                    max_iter=300, n_init=10, n_jobs=1,
+                                    random_state=SEED, verbose=True, split=False)
+
+        titles.append('Quantized Image %d Colors' % 4)
+        image_arrays.append(quantized)
+
+        quantized = quantize_colors(segmented, n_colors=5, n_samples=1000,
+                                    max_iter=300, n_init=10, n_jobs=1,
+                                    random_state=SEED, verbose=True, split=False)
+
+        titles.append('Quantized Image %d Colors' % 5)
+        image_arrays.append(quantized)
+
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            show_plot=True,
+            suptitle=fn.split('/')[-1]
+        )
+
 
 def thresholding(votes_min=3):
     from skimage.filters import threshold_otsu
@@ -489,61 +846,19 @@ def inspect_local_binary_patterns(file=None, dilation_iterations=40, num_regions
             print('Cropping region %d' % label)
             region = np.zeros(yen_channels[0].shape[:-1])
             region[regions == label] = yen_channels[0][regions==label,0]
-            image_titles.append('Region %d' % label)
-            image_arrays.append(binary2gray(region))
 
             # convex hull
             verts = convex_hull_mask(region>0, mask=False)
-            verts, rot, angle  = minimum_bounding_rectangle(verts)
-            verts = np.dot(verts, rot).astype(int)
-            inv_rot = np.linalg.inv(rot)
+            corners, rot, angle  = minimum_bounding_rectangle(verts)
 
-            # translation
-            xtrans = np.abs(min(0,np.min(verts[:,0])))
-            xtrans = xtrans if xtrans > 0 else im.shape[0] - max(np.max(verts[:,0]),im.shape[0])
-            ytrans = np.abs(min(0,np.min(verts[:,1])))
-            ytrans = ytrans if ytrans > 0 else im.shape[1] - max(np.max(verts[:,1]),im.shape[1])
-            translation = -1*np.dot(np.array([xtrans, ytrans]), rot.T).astype(int)
+            yen_crop = rotate_crop_gray_image_from_mbr(region, corners, rot, angle)
+            image_titles.append('Yen Region %d Crop' % label)
+            image_arrays.append(yen_crop)
 
-            # crop window
-            xmax = np.max(verts[:,0]) + xtrans
-            xmin = np.min(verts[:,0]) + xtrans
-            ymax = np.max(verts[:,1]) + ytrans
-            ymin = np.min(verts[:,1]) + ytrans
+            rgb_crop = rotate_crop_rgb_image_from_mbr(im, corners, rot, angle)
+            image_titles.append('RGB Crop %d' % label)
+            image_arrays.append(rgb_crop)
 
-            # transform matrix
-            transform = np.eye(3)
-            transform[0:2,0:2] = rot.T
-            transform[0:2, 2] = [translation[1], translation[0]]
-
-            transform = SimilarityTransform(matrix=transform)
-            crop = np.zeros(im.shape[:-1])
-            crop[:,:] = im[:,:,0] # binary_image * 255
-            crop = warp(crop, transform)
-            crop = crop[xmin:xmax, ymin:ymax]
-            region = warp(region, transform)
-            region = region[xmin:xmax, ymin:ymax]
-
-            rgb_image = np.zeros((xmax-xmin, ymax-ymin, 3), dtype='uint8')
-            for i in range(3):
-                chan = np.zeros(im.shape[:-1])
-                chan[:,:] = im[:,:,0] # binary_image * 255
-                chan = warp(chan, transform)
-                chan = chan[xmin:xmax, ymin:ymax]
-                rgb_image[:,:,i] = chan
-
-            #image_titles.append('Crop %d' % label)
-            #image_arrays.append(rgb_image)
-
-            # lbp features at a set of points
-            lbp = skimage.feature.local_binary_pattern(crop, n_points, radius, method='uniform')
-            lbp = np.ma.compressed(lbp[region > 0])
-            if lbp.size == 0:
-                print('lbp is zero... continuing')
-                continue
-            hist, bins = np.histogram(lbp, bins=20, density=True)
-            hist_titles.append('LBP Histogram for Region %d' % label)
-            histograms.append((hist, bins))
 
         plot_images_and_histograms(
             image_arrays=image_arrays,
