@@ -1,5 +1,3 @@
-from __future__ import (print_function, division)
-
 import os
 import json
 import math
@@ -25,6 +23,7 @@ from skimage.filters import threshold_yen
 import skimage.transform
 import skimage.feature
 from skimage import exposure
+from skimage import draw
 
 import sklearn.utils
 from sklearn.cluster import KMeans
@@ -258,7 +257,7 @@ def segmentation(retain=3, n_segments=20, compactness=20, sigma=0):
 
 def threshold_by_channel(image, threshold, n_channels=3):
     rtn = []
-    for i in xrange(n_channels):
+    for i in range(n_channels):
         ch = np.zeros(image.shape)
         ch[image[:,:,i] > threshold, :] = 255
         ch = smallest_partition(ch, i)
@@ -454,6 +453,20 @@ def extract_brightest_reds(image, thresh=100, verbose=True):
     return res.astype('uint8')
 
 
+def extract_brightest_blues(image, thresh=160, verbose=True):
+    if verbose:
+        print('extracting blues')
+        print('threshold=%f' % (thresh, ))
+
+    image = image.astype('uint8')
+    ycrcb = cv2.cvtColor(image, cv2.COLOR_RGB2YCR_CB)
+    lower_blue = np.array([0,0,thresh])
+    upper_blue = np.array([255,255,255])
+    mask = cv2.inRange(ycrcb, lower_blue, upper_blue)
+    res = cv2.bitwise_and(image, image, mask=mask)
+    return res.astype('uint8')
+
+
 def list_colors_exclude_black(image):
     colors = pd.DataFrame(image.reshape(-1,3)).drop_duplicates().values
     colors = colors[np.logical_and.reduce(colors[:,:] > 10, axis=1),:]
@@ -536,70 +549,115 @@ def apply_gabor_filters(image, filters):
 
 
 ###########################################################################
-## examine feature
+## experiments
 
-def inspect_gabor_patterns(file=None, dilation_iterations=40, num_regions=4):
+# search
+def draw_reference_frame(x,y,z,h,theta):
+    frame = np.ones((2 * y + 1, x + 1))
+    frame.fill(0)
+    red_x = np.array([0, x//2, x, 0])
+    red_y = np.array([0, y, 0, 0])
+    rr, cc = draw.polygon(red_y, red_x)
+    frame[rr, cc] = 2
+    m = h * x // (2 * y)
+    white_x = np.array([m, x-m, z, m])
+    white_y = np.array([h, h, 0, h])
+    rr, cc = draw.polygon(white_y, white_x)
+    frame[rr, cc] = 3
+
+    cy = y
+    cx = x // 2 - 1
+    radius = cx
+    rr, cc = draw.circle(cy, cx, radius)
+    zeros = np.ones_like(frame)
+    zeros[rr, cc] = 0
+    frame[zeros==1] = 1
+
+    c_in=np.array(frame.shape) // 2
+    c_out=np.array(frame.shape) // 2
+    transform=np.array([[np.cos(theta),-np.sin(theta)],[np.sin(theta),np.cos(theta)]])
+    offset = c_in-c_out.dot(transform)
+    frame = ndimage.interpolation.affine_transform(
+        frame,
+        transform.T,
+        order=0,
+        cval=1,
+        offset=offset
+    ).astype(int)
+    return frame.astype('uint8')
+
+
+def experiment_yen_reds_fit_region(file=None):
     images = image_generator()
     if file is not None:
         images = add_image_to_image_generator(images, file)
 
-    gabor_filters = build_gabor_filters()
     for fn, im in images:
+        print(fn)
         image_arrays = []
         titles = []
 
         # plot original image
-        titles.append('Original Image')
+        titles.append('Original')
         image_arrays.append(im)
 
-        # segmented image
-        segmented = segment_image(im, n_segments=20, compactness=20, sigma=2)
-        titles.append('Segmented Image')
-        image_arrays.append(segmented)
+        # threshold
+        yen = threshold_yen(im)
+        thresholded = threshold_by_channel(im, yen)[0]
+        titles.append('Yen Thresholded')
+        image_arrays.append(thresholded)
 
-        # re-segment image
-        brightest_colors = extract_brightest_colors(segmented, thresh=3.5)
-        bright_regions = select_colors(segmented, brightest_colors)
-        resegmented = segmented.copy()
-        resegmented[bright_regions <= 0] = 0
-        resegmented = segment_image(resegmented, n_segments=5, compactness=30, sigma=2)
-        titles.append('Re-Segmented Image')
-        image_arrays.append(resegmented)
+        # reds
+        equalized = np.zeros_like(im, dtype='uint8')
+        for chan in range(3):
+            equalized[:,:,chan] = (exposure.equalize_hist(im[:,:,chan]) * 255).astype('uint8')
 
-        colors = list_colors_exclude_black(segmented)[[0, 4, 8, 12, 16]]
-        rgb_crops = []
-        rgb_labels = []
-        crop_titles = []
-        for color in list(colors):
-            mask = select_colors(segmented, [color]) > 0
-            x, y = ndimage.measurements.center_of_mass((mask[:,:,0] > 0).astype(int))
-            xmin = int(max(x-50,0))
-            xmax = int(min(x+50, im.shape[0]-1))
-            ymin = int(max(y-50,0))
-            ymax = int(min(y+50, im.shape[1]-1))
-            rgb_crops.append(im[xmin:xmax,ymin:ymax, :].copy())
-            rgb_labels.append(str(color))
-            crop_titles.append('Crop for Color ' + str(color))
+        # reds
+        thresh = 160
+        reds = extract_brightest_reds(equalized, thresh=thresh, verbose=False)
+        titles.append('Reds Thresholded YCBCR %d' % thresh)
+        image_arrays.append(reds)
 
-        subplot_images(
-            rgb_crops,
-            titles=crop_titles,
-            suptitle='Crops'
-        )
+        # encode
+        encoded = np.zeros_like(im[:,:,0], dtype='uint8') * -1
+        encoded[thresholded[:,:,0]>0] = 2
+        encoded[np.amax(reds, axis=2) > 0] = 1
+        encoded = encoded.astype('uint8')
+        titles.append('Encoded')
+        image_arrays.append(encoded)
 
-        for crop, color in zip(rgb_crops, rgb_labels):
-            rgb_gabor = apply_gabor_filters(crop, gabor_filters)
-            subplot_images(rgb_gabor, suptitle='RGB Gabor Filters for Color ' + color)
+        print('fitting reference frame')
+        best_loc, best_val = None, 0
+        for x in range(100, 1000, 100):
+            print('x = ', x)
+            for y in range(3 * x // 2, 1500, 100):
+                print('y = ', y)
+                for h in range(y // 3 - 1, y, y // 3):
+                    for z in range(x // 3 - 1, x, x // 3):
+                        for i in range(1, 4):
+                            theta = i * np.pi/3
+                            reference = draw_reference_frame(x,y,z,h,theta)
+                            res = cv2.matchTemplate(encoded,reference,cv2.TM_SQDIFF)
+                            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                            if max_val > best_val:
+                                best_val = max_val
+                                best_loc = max_loc
+                                print(x,y,z,h,np.degrees(theta))
+                                print(max_val, best_loc)
+                                print('\n')
 
+
+        # plot
         subplot_images(
             image_arrays,
             titles=titles,
-            suptitle=fn.split('/')[-1],
-            show_plot=True
+            #show_plot=True,
+            save_plot=True,
+            suptitle='crop-'+fn.split('/')[-1]
         )
 
 
-def yen_mask_and_normalize(file=None):
+def experiment_yen_distort_reds_entropy_blues(file=None):
     images = image_generator()
     if file is not None:
         images = add_image_to_image_generator(images, file)
@@ -612,43 +670,73 @@ def yen_mask_and_normalize(file=None):
         titles.append('Original')
         image_arrays.append(im)
 
-        # thresholded
+        # threshold
         yen = threshold_yen(im)
         thresholded = threshold_by_channel(im, yen)[0]
         titles.append('Yen Thresholded')
         image_arrays.append(thresholded)
 
-        # masked and equalized
-        masked = im.copy()
-        masked[thresholded<=0] = 0
+        # distort
+        equalized = np.zeros_like(im, dtype='uint8')
+        for chan in range(3):
+            equalized[:,:,chan] = (exposure.equalize_hist(im[:,:,chan]) * 255).astype('uint8')
 
-        titles.append('Masked')
-        image_arrays.append(masked)
+        # entropy
+        ent = skimage.filters.rank.entropy(equalized[:,:,0], skimage.morphology.disk(3))
+        titles.append('Entropy')
+        image_arrays.append(ent)
 
-        # equalize
-        from skimage.util import img_as_ubyte
-        equalized = masked.copy()
-        for chan in xrange(3):
-            img = masked[:,:,chan].astype('uint8')
-            range = (200, 255) if chan == 0 else (100, 155) if chan == 1 else (0, 55)
-            rescaled = exposure.rescale_intensity(img, in_range=range)
-            equalized[:,:,chan] = rescaled
-            break
+        # thresholded
+        thresh = 1.5
+        blues = np.zeros_like(im, dtype='uint8')
+        blues[ent > thresh,:] = 0
+        blues[ent <= thresh] = 255
+        titles.append('Entropy Blues Thresholded %d' % thresh)
+        image_arrays.append(blues)
 
-        titles.append('Equalied')
-        image_arrays.append(equalized)
+        # reds
+        thresh = 160
+        reds = extract_brightest_reds(equalized, thresh=thresh, verbose=False)
+        titles.append('Reds Thresholded YCBCR %d' % thresh)
+        image_arrays.append(reds)
+
+        # union
+        union = np.zeros_like(im)
+        union[thresholded>0] = 255
+        union[reds>0] = 255
+        union[blues>0] = 255
+        titles.append('Union')
+        image_arrays.append(union)
+
+        for name, color_image in zip(['yen','blues','reds','union'],[thresholded, blues, reds, union]):
+            binary_image = color_image[:,:,0] > 0
+            structure = calculate_binary_opening_structure(binary_image)
+            binary_image = binary_opening(binary_image, structure=structure)
+            binary_image = binary_dilation(binary_image, iterations=3)
+            if name == 'yen':
+                regions, labels = extract_largest_regions(binary_image, num_regions=2)
+            else:
+                regions, labels = extract_largest_regions(binary_image, num_regions=3)
+
+            mask = convex_hull_mask(regions>0, mask=True)
+            print(mask.shape)
+            crop = np.zeros_like(im)
+            crop[mask > 0,:] = im[mask > 0,:]
+            titles.append(name.title() + 'Region')
+            image_arrays.append(crop)
+
 
         # plot
         subplot_images(
             image_arrays,
             titles=titles,
-            show_plot=True,
-            suptitle=fn.split('/')[-1]
+            #show_plot=True,
+            save_plot=True,
+            suptitle='crop-'+fn.split('/')[-1]
         )
-        continue
 
 
-def inspect_color_quantization(file=None):
+def experiment_yen_distort_reds(file=None):
     images = image_generator()
     if file is not None:
         images = add_image_to_image_generator(images, file)
@@ -668,17 +756,25 @@ def inspect_color_quantization(file=None):
 
         # equalize
         equalized = np.zeros_like(im)
-        for chan in xrange(3):
+        for chan in range(3):
             equalized[:,:,chan] = (exposure.equalize_hist(im[:,:,chan]) * 255).astype('uint8')
 
         titles.append('Equalized')
         image_arrays.append(equalized)
 
         # experiments point to a reasonable threshold of 10 or 20
-        thresh = 160
+        thresh = 140 #TUNE: 160
         reds_ycbcr = extract_brightest_reds(equalized, thresh=thresh, verbose=False)
         titles.append('Reds Thresholded YCBCR %d' % thresh)
         image_arrays.append(reds_ycbcr)
+
+        filled_ycbcr = reds_ycbcr.copy()
+        mask = ndimage.binary_fill_holes((reds_ycbcr[:,:,0] > 0))
+        #mask = ndimage.binary_fill_holes((np.amax(reds_ycbcr, axis=2) > 0))
+        filled_ycbcr[mask,:] = np.array([255, 0, 0])
+
+        titles.append('Filled YCBCR Reds')
+        image_arrays.append(filled_ycbcr)
 
         smoothed_ycbcr = reds_ycbcr.copy()
         smoothed_ycbcr[:,:,0] = binary_closing(smoothed_ycbcr[:,:,0]>0, iterations=3) * 255
@@ -742,7 +838,247 @@ def inspect_color_quantization(file=None):
         )
 
 
-def thresholding(votes_min=3):
+
+def experiment_yen_threshold(image=None):
+    images = image_generator()
+    if image is not None:
+        img_path=os.path.join(BASE_DIR, 'data/imgs/')
+        fn = os.path.join(img_path, image)
+        im = load_images([fn])[0].astype('int32')
+        images = itertools.chain([(fn, im)], images)
+
+    for fn, im in images:
+        imgs = [im]
+        titles = ['Original']
+        print('computing yen threshold')
+        yen = threshold_yen(im)
+        channels = threshold_by_channel(im ,yen)
+        titles.append('Yen Thresholded')
+        imgs.append(channels[0])
+
+        for cp in [175, 200, 225, 250]:
+            titles.append('Cutpoint %d' % cp)
+            print('cutting')
+            rtn = np.zeros(im.shape)
+            rtn[np.average(im, axis=2, weights=[.7, .1, .2]) > cp,0] = 255
+            for i in range(1,3):
+                rtn[:, :, i] = rtn[:, :, 0]
+
+            imgs.append(rtn)
+
+        print('plotting')
+        plot_images(
+            imgs,
+            titles=titles,
+            suptitle=fn.split('/')[-1]
+        )
+
+
+def experiement_yen_regions_bounding_rectangle(file=None, dilation_iterations=40, num_regions=5, radius=2):
+    from skimage.transform import warp
+    from skimage.transform import SimilarityTransform
+    images = image_generator()
+    images = add_image_to_image_generator(images, file)
+    n_points = 8*radius
+
+    for fn, im in images:
+        image_arrays = []
+        histograms = []
+        image_titles = []
+        hist_titles = []
+
+        image_arrays.append(im)
+        image_titles.append('original image')
+
+        yen = threshold_yen(im)
+        yen_channels = threshold_by_channel(im, yen)
+        image_titles.append('Yen Thresholded Channel 1')
+        image_arrays.append(yen_channels[0])
+
+        binary_image = yen_channels[0][:,:,0] > 0
+        structure = calculate_binary_opening_structure(binary_image)
+        binary_image = binary_opening(binary_image, structure=structure)
+        binary_image = binary_dilation(binary_image, iterations=dilation_iterations)
+        regions, labels = extract_largest_regions(binary_image, num_regions=num_regions)
+
+        for label in labels:
+            print('Cropping region %d' % label)
+            region = np.zeros(yen_channels[0].shape[:-1])
+            region[regions == label] = yen_channels[0][regions==label,0]
+
+            # convex hull
+            verts = convex_hull_mask(region>0, mask=False)
+            corners, rot, angle  = minimum_bounding_rectangle(verts)
+
+            yen_crop = rotate_crop_gray_image_from_mbr(region, corners, rot, angle)
+            image_titles.append('Yen Region %d Crop' % label)
+            image_arrays.append(yen_crop)
+
+            rgb_crop = rotate_crop_rgb_image_from_mbr(im, corners, rot, angle)
+            image_titles.append('RGB Crop %d' % label)
+            image_arrays.append(rgb_crop)
+
+
+        plot_images_and_histograms(
+            image_arrays=image_arrays,
+            image_titles=image_titles,
+            image_suptitle=fn.split('/')[-1]
+        )
+
+
+
+def experiement_segment_crop_gabor(file=None, dilation_iterations=40, num_regions=4):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    gabor_filters = build_gabor_filters()
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original Image')
+        image_arrays.append(im)
+
+        # segmented image
+        segmented = segment_image(im, n_segments=20, compactness=20, sigma=2)
+        titles.append('Segmented Image')
+        image_arrays.append(segmented)
+
+        # re-segment image
+        brightest_colors = extract_brightest_colors(segmented, thresh=3.5)
+        bright_regions = select_colors(segmented, brightest_colors)
+        resegmented = segmented.copy()
+        resegmented[bright_regions <= 0] = 0
+        resegmented = segment_image(resegmented, n_segments=5, compactness=30, sigma=2)
+        titles.append('Re-Segmented Image')
+        image_arrays.append(resegmented)
+
+        colors = list_colors_exclude_black(segmented)[[0, 4, 8, 12, 16]]
+        rgb_crops = []
+        rgb_labels = []
+        crop_titles = []
+        for color in list(colors):
+            mask = select_colors(segmented, [color]) > 0
+            x, y = ndimage.measurements.center_of_mass((mask[:,:,0] > 0).astype(int))
+            xmin = int(max(x-50,0))
+            xmax = int(min(x+50, im.shape[0]-1))
+            ymin = int(max(y-50,0))
+            ymax = int(min(y+50, im.shape[1]-1))
+            rgb_crops.append(im[xmin:xmax,ymin:ymax, :].copy())
+            rgb_labels.append(str(color))
+            crop_titles.append('Crop for Color ' + str(color))
+
+        subplot_images(
+            rgb_crops,
+            titles=crop_titles,
+            suptitle='Crops'
+        )
+
+        for crop, color in zip(rgb_crops, rgb_labels):
+            rgb_gabor = apply_gabor_filters(crop, gabor_filters)
+            subplot_images(rgb_gabor, suptitle='RGB Gabor Filters for Color ' + color)
+
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            suptitle=fn.split('/')[-1],
+            show_plot=True
+        )
+
+
+
+def experiement_clahe_and_entropy(file=None):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    claheizer = cv2.createCLAHE()
+
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original')
+        image_arrays.append(im)
+
+        # clahe
+        clahe = cv2.cvtColor(im.astype('uint8'), cv2.COLOR_RGB2Lab)
+        tmp = clahe.copy()
+        tmp[:,:,0] = claheizer.apply(clahe[:,:,0])
+        clahe = cv2.cvtColor(tmp.astype('uint8'), cv2.COLOR_Lab2RGB)
+
+        titles.append('CLAHE')
+        image_arrays.append(clahe)
+
+        tmp = cv2.cvtColor(clahe, cv2.COLOR_RGB2Lab)
+        ent = skimage.filters.rank.entropy(tmp[:,:,0], skimage.morphology.disk(5))
+        titles.append('Entropy L')
+        image_arrays.append(ent)
+
+        # plot
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            show_plot=True,
+            suptitle=fn.split('/')[-1]
+        )
+
+
+def experiment_yen_mask_rescale(file=None):
+    images = image_generator()
+    if file is not None:
+        images = add_image_to_image_generator(images, file)
+
+    claheizer = cv2.createCLAHE()
+
+    for fn, im in images:
+        image_arrays = []
+        titles = []
+
+        # plot original image
+        titles.append('Original')
+        image_arrays.append(im)
+
+        # thresholded
+        yen = threshold_yen(im)
+        thresholded = threshold_by_channel(im, yen)[0]
+        titles.append('Yen Thresholded')
+        image_arrays.append(thresholded)
+
+        # masked and equalized
+        masked = im.copy()
+        masked[thresholded<=0] = 0
+
+        titles.append('Masked')
+        image_arrays.append(masked)
+
+        # equalize
+        from skimage.util import img_as_ubyte
+        equalized = masked.copy()
+        for chan in range(1,3):
+            img = masked[:,:,chan].astype('uint8')
+            rng = (0, 175) if chan == 1 else (175,255)
+            rescaled = exposure.rescale_intensity(img, in_range=rng)
+            equalized[:,:,chan] = rescaled
+            break
+
+        titles.append('Equalied')
+        image_arrays.append(equalized)
+
+        # plot
+        subplot_images(
+            image_arrays,
+            titles=titles,
+            show_plot=True,
+            suptitle=fn.split('/')[-1]
+        )
+
+
+
+def experiment_thresholding(votes_min=3):
     from skimage.filters import threshold_otsu
     from skimage.filters import threshold_li
     from skimage.filters import threshold_yen
@@ -824,156 +1160,4 @@ def thresholding(votes_min=3):
             thresholded_images,
             titles=titles,
             suptitle=fn.split('/')[-1]
-        )
-
-
-def inspect_glare_patterns(image=None):
-    images = image_generator()
-    if image is not None:
-        img_path=os.path.join(BASE_DIR, 'data/imgs/')
-        fn = os.path.join(img_path, image)
-        im = load_images([fn])[0].astype('int32')
-        images = itertools.chain([(fn, im)], images)
-
-    for fn, im in images:
-        imgs = [im]
-        titles = ['Original']
-        print('computing yen threshold')
-        yen = threshold_yen(im)
-        channels = threshold_by_channel(im ,yen)
-        titles.append('Yen Thresholded')
-        imgs.append(channels[0])
-
-        for cp in [175, 200, 225, 250]:
-            titles.append('Cutpoint %d' % cp)
-            print('cutting')
-            rtn = np.zeros(im.shape)
-            rtn[np.average(im, axis=2, weights=[.7, .1, .2]) > cp,0] = 255
-            for i in xrange(1,3):
-                rtn[:, :, i] = rtn[:, :, 0]
-
-            imgs.append(rtn)
-
-        print('plotting')
-        plot_images(
-            imgs,
-            titles=titles,
-            suptitle=fn.split('/')[-1]
-        )
-
-
-def generate_masks(binary_image, rgb_image):
-
-    bin = binary_image > 0
-    structure = calculate_binary_opening_structure(bin)
-    bin = binary_opening(bin, structure=structure)
-    rem = np.zeros(binary_image.shape + (3,))
-    rem[bin > 0, :] = 255
-
-    print('dilation')
-    strutcure = np.ones((5, 5))
-    dilated = np.zeros(binary_image.shape + (3,))
-    dilated[binary_dilation(rem[:,:,0], iterations=40) > 0, : ] = 255
-
-    print('dilation mask')
-    mask1 = np.zeros(rgb_image.shape)
-    mask1[dilated > 0] = rgb_image[dilated > 0]
-
-    print('largest regions')
-    largest = mask_largest_regions(dilated[:,:,0])
-    mask2 = np.zeros(rgb_image.shape)
-    for i in xrange(3):
-        mask2[largest > 0,i] = rgb_image[largest > 0,i]
-
-    print('convex hull')
-    hull =  convex_hull_mask(largest>0)
-    mask3 = np.zeros(rgb_image.shape)
-    for i in xrange(3):
-        mask3[hull > 0,i] = rgb_image[hull > 0,i]
-
-    print('minimal bounding rectangle')
-    verts =  convex_hull_mask(largest>0, mask=False)
-    verts, _, _ = minimum_bounding_rectangle(verts)
-    verts = [(verts[i,0], verts[i,1]) for i in range(4)]
-    hull = mask_polygon(verts, binary_image.shape)
-    mask4 = np.zeros(rgb_image.shape)
-    for i in xrange(3):
-        mask4[hull > 0,i] = rgb_image[hull > 0,i]
-
-    return [rem, dilated, mask1, mask2, mask3, mask4]
-
-
-def threshold_and_generate_objects(size=15):
-    images = image_generator()
-
-    for fn, im in images:
-        print('inspecting image: ', fn)
-
-        print('computing yen threshold')
-        yen = threshold_yen(im)
-        channels = threshold_by_channel(im ,yen)
-        imgs = []
-        chan = channels[0]
-        imgs.append(chan)
-        imgs.extend(generate_masks(chan[:,:,0], im))
-        print('plotting')
-        plot_images(
-            [imgs[0],imgs[-1]],
-            suptitle=fn.split('/')[-1]
-        )
-
-
-
-def inspect_local_binary_patterns(file=None, dilation_iterations=40, num_regions=5, radius=2):
-    from skimage.transform import warp
-    from skimage.transform import SimilarityTransform
-    images = image_generator()
-    images = add_image_to_image_generator(images, file)
-    n_points = 8*radius
-
-    for fn, im in images:
-        image_arrays = []
-        histograms = []
-        image_titles = []
-        hist_titles = []
-
-        image_arrays.append(im)
-        image_titles.append('original image')
-
-        yen = threshold_yen(im)
-        yen_channels = threshold_by_channel(im, yen)
-        image_titles.append('Yen Thresholded Channel 1')
-        image_arrays.append(yen_channels[0])
-
-        binary_image = yen_channels[0][:,:,0] > 0
-        structure = calculate_binary_opening_structure(binary_image)
-        binary_image = binary_opening(binary_image, structure=structure)
-        binary_image = binary_dilation(binary_image, iterations=dilation_iterations)
-        regions, labels = extract_largest_regions(binary_image, num_regions=num_regions)
-
-        for label in labels:
-            print('Cropping region %d' % label)
-            region = np.zeros(yen_channels[0].shape[:-1])
-            region[regions == label] = yen_channels[0][regions==label,0]
-
-            # convex hull
-            verts = convex_hull_mask(region>0, mask=False)
-            corners, rot, angle  = minimum_bounding_rectangle(verts)
-
-            yen_crop = rotate_crop_gray_image_from_mbr(region, corners, rot, angle)
-            image_titles.append('Yen Region %d Crop' % label)
-            image_arrays.append(yen_crop)
-
-            rgb_crop = rotate_crop_rgb_image_from_mbr(im, corners, rot, angle)
-            image_titles.append('RGB Crop %d' % label)
-            image_arrays.append(rgb_crop)
-
-
-        plot_images_and_histograms(
-            image_arrays=image_arrays,
-            histograms=histograms,
-            image_titles=image_titles,
-            hist_titles=hist_titles,
-            image_suptitle=fn.split('/')[-1],
-            hist_suptitle=fn.split('/')[-1]
         )

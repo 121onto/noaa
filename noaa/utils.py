@@ -79,7 +79,7 @@ def plot_images(image_arrays, dims=None, titles=None, show_plot=False, verbose=T
         plt.close()
 
 
-def subplot_images(images, titles=None, suptitle=False, show_plot=False, verbose=True):
+def subplot_images(images, titles=None, suptitle=False, save_plot=False, show_plot=False, verbose=True):
     if verbose:
         print('drawing image subplot')
 
@@ -117,9 +117,22 @@ def subplot_images(images, titles=None, suptitle=False, show_plot=False, verbose
 
         ax.axis('off')
 
+    if save_plot:
+        if suptitle is not None:
+            out_path = os.path.join(BASE_DIR,'output/', suptitle + '.png')
+            plt.savefig(out_path)
+            plt.close()
+            return
+        else:
+            raise ValueError(
+                "Must specify a suptitle to save plot in call to function"
+                "subplot_images."
+            )
+
     if show_plot:
         plt.show()
         plt.close()
+        return
 
 
 def plot_images_and_histograms(image_arrays, histograms,
